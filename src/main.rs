@@ -1,8 +1,15 @@
 use async_trait::async_trait;
-use pingora::prelude::*;
-use std::sync::Arc;
 
-pub struct LB(Arc<LoadBalancer<RoundRobin>>);
+use std::sync::Arc;
+use pingora::lb::LoadBalancer;
+use pingora::prelude::{background_service, HttpPeer, Opt, RoundRobin, TcpHealthCheck};
+use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
+use pingora::server::Server;
+use pingora::Result;
+
+pub struct LB(
+    Arc<LoadBalancer<RoundRobin>>
+);
 
 #[async_trait]
 impl ProxyHttp for LB {
@@ -15,10 +22,12 @@ impl ProxyHttp for LB {
     async fn upstream_peer(&self, _session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
         let upstream = self
             .0
-            .select(b"", 256) // hash doesn't matter for round robin
+            .select(b"", 256) // hash doesn't matter
             .unwrap();
-        println!("upstream peer is: {upstream:?}");
-        let peer = Box::new(HttpPeer::new(upstream, false, "host.docker.internal".to_string()));
+
+        println!("upstream peer is: {:?}", upstream);
+
+        let peer = Box::new(HttpPeer::new(upstream, true, "one.one.one.one".to_string()));
         Ok(peer)
     }
 
@@ -34,7 +43,8 @@ impl ProxyHttp for LB {
 }
 
 fn main() {
-    let mut my_server = Server::new(None).unwrap();
+    let opt = Opt::parse_args();
+    let mut my_server = Server::new(Some(opt)).unwrap();
     my_server.bootstrap();
 
     let mut upstreams = LoadBalancer::try_from_iter([
