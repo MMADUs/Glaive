@@ -8,6 +8,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "pingora",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]

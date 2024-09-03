@@ -1,11 +1,14 @@
 use async_trait::async_trait;
 
 use std::sync::Arc;
+use std::fs::File;
+
 use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, HttpPeer, Opt, RoundRobin, TcpHealthCheck};
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
 use pingora::server::Server;
 use pingora::Result;
+use serde::Deserialize;
 
 pub struct LB(
     Arc<LoadBalancer<RoundRobin>>
@@ -42,7 +45,27 @@ impl ProxyHttp for LB {
     // }
 }
 
+#[derive(Debug, Deserialize)]
+struct ClusterConfig {
+    name: String,
+    prefix: String,           // Prefix for accessing this cluster
+    upstreams: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    clusters: Vec<ClusterConfig>,
+}
+
+fn load_config(file_path: &str) -> Config {
+    let file = File::open(file_path).expect("Unable to open the file");
+    serde_yaml::from_reader(file).expect("Unable to parse YAML")
+}
+
 fn main() {
+    let config = load_config("config.yaml");
+    println!("{:?}", config);
+
     let opt = Opt::parse_args();
     let mut my_server = Server::new(Some(opt)).unwrap();
     my_server.bootstrap();
