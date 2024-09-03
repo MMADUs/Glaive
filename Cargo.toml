@@ -5,6 +5,6 @@ edition = "2021"
 
 [dependencies]
 async-trait="0.1"
-clap = "4.5.16"
-log = "0.4.22"
-pingora = { version = "0.1.0", features = [ "lb" ] }
+pingora = { version = "0.3.0", features = [ "lb" ] }
+serde_yaml = "0.8.26"
+serde = { version = "1.0.209", features = ["derive"] }

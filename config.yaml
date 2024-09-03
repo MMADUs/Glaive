@@ -1,0 +1,13 @@
+# config example
+
+clusters:
+  - name: one
+    prefix: "/clusterone"
+    upstreams:
+      - "1.1.1.1:443"
+      - "127.0.0.1:343"
+  - name: two
+    prefix: "/clustertwo"
+    upstreams:
+      - "1.0.0.1:443"
+      - "127.0.0.2:343"
