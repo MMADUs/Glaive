@@ -1,10 +1,13 @@
 [package]
 name = "ArcX"
 version = "0.1.0"
+authors = ["Muhammad Nizwa | MMADUs <nizbacking@gmail.com>"]
+license = "GNU Affero General Public License v3.0"
 edition = "2021"
 
 [dependencies]
 async-trait="0.1"
-pingora = { version = "0.3.0", features = [ "lb" ] }
-serde_yaml = "0.8.26"
+pingora = { version = "0.3.0", features = [ "lb", "proxy" ] }
+serde_yaml = "0.9.34+deprecated"
 serde = { version = "1.0.209", features = ["derive"] }
+http = "1.1.0"
