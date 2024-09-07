@@ -16,8 +16,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::HashMap;
-use async_trait::async_trait;
-
 use std::sync::Arc;
 use std::fs::File;
 
@@ -25,11 +23,13 @@ use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, HttpPeer, Opt, RoundRobin, TcpHealthCheck};
 use pingora::proxy::{http_proxy_service, ProxyHttp, Session};
 use pingora::server::Server;
-use pingora::{Error, HTTPStatus, Result};
+use pingora::{Result};
 use pingora::services::background::GenBackgroundService;
 
+use async_trait::async_trait;
 use serde::Deserialize;
 
+// Individual cluster from yaml
 #[derive(Debug, Deserialize)]
 struct ClusterConfig {
     name: String,
@@ -37,11 +37,13 @@ struct ClusterConfig {
     upstreams: Vec<String>,
 }
 
+// Config struct from yaml
 #[derive(Debug, Deserialize)]
 struct Config {
     clusters: Vec<ClusterConfig>,
 }
 
+// Main Struct as Router to implement ProxyHttp
 struct Router {
     clusters: Vec<Arc<LoadBalancer<RoundRobin>>>,
     prefix_map: HashMap<String, usize>,
@@ -53,31 +55,50 @@ impl ProxyHttp for Router {
     fn new_ctx(&self) {}
 
     async fn upstream_peer(&self, session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
-        // Get the request path
-        let path = session.req_header().uri.path().to_string();
+        // Clone the original request header and get the URI path
+        let cloned_req_header = session.req_header().clone();
+        let original_uri = cloned_req_header.uri.path();
+
+        // Initialize the path to the original URI
+        let mut modified_uri = original_uri.to_string();
 
         // Find the cluster address based on the URI prefix
         let cluster_idx = self
             .prefix_map
             .iter()
-            .find(|(prefix, _)| path.starts_with(prefix.as_str()))
-            .map(|(_, &idx)| idx)
+            .find(|(prefix, _)| original_uri.starts_with(prefix.as_str()))
+            .map(|(prefix, &idx)| {
+                // If a prefix matches, modify the URI by removing the prefix
+                modified_uri = original_uri.replacen(prefix, "", 1);
+                idx
+            })
             .unwrap_or_else(|| {
                 // Default to the first cluster if no prefix matches
                 0
             });
 
-        // Select the cluster based on the selected address
+        // Update the session with the modified URI
+        match modified_uri.parse::<http::Uri>() {
+            Ok(new_uri) => session.req_header_mut().set_uri(new_uri),
+            Err(_) => {
+                // Log error or handle more gracefully if needed
+                session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
+            }
+        }
+
+        // Select the cluster based on the selected index
         let cluster = &self.clusters[cluster_idx];
 
         // Set up the upstream
         let upstream = cluster.select(b"", 256).unwrap(); // Hash doesn't matter for round robin
 
+        // Debugging output
         println!("upstream peer is: {:?}", upstream);
         println!("cluster idx is: {:?}", cluster_idx);
-        println!("cluster path is: {:?}", path);
+        println!("original path is: {:?}", original_uri);
+        println!("modified path is: {:?}", modified_uri);
 
-        // Set SNI to the clusters host
+        // Set SNI to the cluster's host
         let peer = Box::new(HttpPeer::new(upstream, false, "host.docker.internal".to_string()));
         Ok(peer)
     }
@@ -111,9 +132,9 @@ fn main() {
     let mut prefix_map = HashMap::new();
 
     // Set up a cluster based on config
-    for (idx, clusterConf) in config.clusters.iter().enumerate() {
+    for (idx, cluster_configuration) in config.clusters.iter().enumerate() {
         let cluster_service = build_cluster_service(
-            &clusterConf.upstreams.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            &cluster_configuration.upstreams.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
         );
 
         // Add the cluster to the list
@@ -121,8 +142,8 @@ fn main() {
         my_server.add_service(cluster_service);
 
         // Add the prefix to the prefix list
-        prefix_map.insert(clusterConf.prefix.clone(), idx);
-        println!("Setting up cluster: {}", idx)
+        prefix_map.insert(cluster_configuration.prefix.clone(), idx);
+        println!("Setting up cluster: {}", idx + 1)
     }
 
     // Set the list of clusters into routes

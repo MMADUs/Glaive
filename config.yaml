@@ -2,12 +2,12 @@
 
 clusters:
   - name: one
-    prefix: "/one/"
+    prefix: "/one"
     upstreams:
       - "host.docker.internal:3000"
       - "host.docker.internal:3001"
   - name: two
-    prefix: "/two/"
+    prefix: "/two"
     upstreams:
       - "host.docker.internal:3002"
       - "host.docker.internal:3003"
