@@ -49,58 +49,85 @@ struct Router {
     prefix_map: HashMap<String, usize>,
 }
 
+struct RouterCtx {
+    cluster_address: usize,
+}
+
+fn select_cluster(
+    prefix_map: &HashMap<String, usize>,
+    original_uri: &str
+) -> (Option<usize>, String) {
+    let mut modified_uri = original_uri.to_string();
+
+    let cluster_idx_option = prefix_map
+        .iter()
+        .find(|(prefix, _)| original_uri.starts_with(prefix.as_str()))
+        .map(|(prefix, &idx)| {
+            modified_uri = original_uri.replacen(prefix, "", 1);
+            idx
+        });
+
+    (cluster_idx_option, modified_uri)
+}
+
 #[async_trait]
 impl ProxyHttp for Router {
-    type CTX = ();
-    fn new_ctx(&self) {}
+    type CTX = RouterCtx;
 
-    async fn upstream_peer(&self, session: &mut Session, _ctx: &mut ()) -> Result<Box<HttpPeer>> {
-        // Clone the original request header and get the URI path
-        let cloned_req_header = session.req_header().clone();
-        let original_uri = cloned_req_header.uri.path();
+    fn new_ctx(&self) -> Self::CTX {
+        RouterCtx { cluster_address: 0 }
+    }
 
-        // Initialize the path to the original URI
-        let mut modified_uri = original_uri.to_string();
-
-        // Find the cluster address based on the URI prefix
-        let cluster_idx = self
-            .prefix_map
-            .iter()
-            .find(|(prefix, _)| original_uri.starts_with(prefix.as_str()))
-            .map(|(prefix, &idx)| {
-                // If a prefix matches, modify the URI by removing the prefix
-                modified_uri = original_uri.replacen(prefix, "", 1);
-                idx
-            })
-            .unwrap_or_else(|| {
-                // Default to the first cluster if no prefix matches
-                0
-            });
-
-        // Update the session with the modified URI
-        match modified_uri.parse::<http::Uri>() {
-            Ok(new_uri) => session.req_header_mut().set_uri(new_uri),
-            Err(_) => {
-                // Log error or handle more gracefully if needed
-                session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
-            }
-        }
-
+    async fn upstream_peer(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<Box<HttpPeer>> {
         // Select the cluster based on the selected index
-        let cluster = &self.clusters[cluster_idx];
+        let cluster = &self.clusters[ctx.cluster_address];
 
         // Set up the upstream
         let upstream = cluster.select(b"", 256).unwrap(); // Hash doesn't matter for round robin
 
         // Debugging output
         println!("upstream peer is: {:?}", upstream);
-        println!("cluster idx is: {:?}", cluster_idx);
-        println!("original path is: {:?}", original_uri);
-        println!("modified path is: {:?}", modified_uri);
 
         // Set SNI to the cluster's host
         let peer = Box::new(HttpPeer::new(upstream, false, "host.docker.internal".to_string()));
         Ok(peer)
+    }
+
+    async fn request_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<bool> {
+        // Clone the original request header and get the URI path
+        let cloned_req_header = session.req_header().clone();
+        let original_uri = cloned_req_header.uri.path();
+
+        // select the cluster based on prefix
+        let (cluster_idx_option, modified_uri) = select_cluster(&self.prefix_map, original_uri);
+
+        // If cluster and prefix found, proceed with the upstream URI
+        match (cluster_idx_option, modified_uri.parse::<http::Uri>()) {
+            (Some(idx), Ok(new_uri)) => {
+                // If cluster and URI found
+                session.req_header_mut().set_uri(new_uri);
+                ctx.cluster_address = idx;
+                Ok(false)
+            },
+            (Some(_), Err(_)) => {
+                // Handle URI parse error
+                session.respond_error(400).await?;
+                Ok(true)
+            },
+            (None, _) => {
+                // No prefix matches, respond with a 404 error
+                session.respond_error(404).await?;
+                Ok(true)
+            }
+        }
     }
 }
 
