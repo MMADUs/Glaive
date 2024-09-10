@@ -53,12 +53,16 @@ struct RouterCtx {
     cluster_address: usize,
 }
 
-fn select_cluster(
+async fn select_cluster(
     prefix_map: &HashMap<String, usize>,
-    original_uri: &str
-) -> (Option<usize>, String) {
+    original_uri: &str,
+    session: &mut Session,
+    ctx: &mut RouterCtx,
+) -> bool {
+    // create a uri to be modified
     let mut modified_uri = original_uri.to_string();
 
+    // select the cluster address based on uri prefix
     let cluster_idx_option = prefix_map
         .iter()
         .find(|(prefix, _)| original_uri.starts_with(prefix.as_str()))
@@ -67,17 +71,52 @@ fn select_cluster(
             idx
         });
 
-    (cluster_idx_option, modified_uri)
+    // check if cluster address exist
+    match cluster_idx_option {
+        Some(idx) => {
+            // if exist modify cluster address to the selected address
+            println!("Cluster idx: {}", idx);
+            ctx.cluster_address = idx;
+        }
+        None => {
+            session.respond_error(404).await.expect("Failed to respond with 404 error");
+            return true
+        }
+    }
+
+    if modified_uri.is_empty() {
+        println!("uri is empty.");
+        // if modified uri is empty then just redirect to "/"
+        session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
+        return true
+    }
+
+    // parse the modified uri to a valid http uri
+    match modified_uri.parse::<http::Uri>() {
+        Ok(new_uri) => {
+            println!("New URI: {}", new_uri);
+            session.req_header_mut().set_uri(new_uri);
+            false
+        }
+        Err(e) => {
+            println!("URI parse error: {}", e);
+            session.respond_error(400).await.expect("Failed to respond with 400 error");
+            true
+        }
+    }
 }
 
 #[async_trait]
 impl ProxyHttp for Router {
+    // initialize ctx types
     type CTX = RouterCtx;
 
+    // initial ctx values
     fn new_ctx(&self) -> Self::CTX {
         RouterCtx { cluster_address: 0 }
     }
 
+    // connect to upstream IO
     async fn upstream_peer(
         &self,
         session: &mut Session,
@@ -88,8 +127,6 @@ impl ProxyHttp for Router {
 
         // Set up the upstream
         let upstream = cluster.select(b"", 256).unwrap(); // Hash doesn't matter for round robin
-
-        // Debugging output
         println!("upstream peer is: {:?}", upstream);
 
         // Set SNI to the cluster's host
@@ -97,6 +134,7 @@ impl ProxyHttp for Router {
         Ok(peer)
     }
 
+    // the very first thing that executes
     async fn request_filter(
         &self,
         session: &mut Session,
@@ -105,29 +143,11 @@ impl ProxyHttp for Router {
         // Clone the original request header and get the URI path
         let cloned_req_header = session.req_header().clone();
         let original_uri = cloned_req_header.uri.path();
+        println!("original uri: {}", original_uri);
 
         // select the cluster based on prefix
-        let (cluster_idx_option, modified_uri) = select_cluster(&self.prefix_map, original_uri);
-
-        // If cluster and prefix found, proceed with the upstream URI
-        match (cluster_idx_option, modified_uri.parse::<http::Uri>()) {
-            (Some(idx), Ok(new_uri)) => {
-                // If cluster and URI found
-                session.req_header_mut().set_uri(new_uri);
-                ctx.cluster_address = idx;
-                Ok(false)
-            },
-            (Some(_), Err(_)) => {
-                // Handle URI parse error
-                session.respond_error(400).await?;
-                Ok(true)
-            },
-            (None, _) => {
-                // No prefix matches, respond with a 404 error
-                session.respond_error(404).await?;
-                Ok(true)
-            }
-        }
+        let result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+        Ok(result)
     }
 }
 
