@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 
 use pingora::lb::LoadBalancer;
@@ -41,11 +41,13 @@ struct Config {
     clusters: Vec<ClusterConfig>,
 }
 
+// load config from yaml
 fn load_yaml(file_path: &str) -> Config {
     let file = File::open(file_path).expect("Unable to open the file");
     serde_yaml::from_reader(file).expect("Unable to parse YAML")
 }
 
+// build the cluster
 fn build_cluster_service(
     upstreams: &[&str],
 ) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
@@ -55,12 +57,52 @@ fn build_cluster_service(
     background_service("cluster health check", cluster)
 }
 
+// validate clusters configuration
+fn validate_cluster_config(config: &ClusterConfig) -> bool {
+    if config.name.is_empty() {
+        return true;
+    }
+
+    if config.prefix.is_empty() || !config.prefix.starts_with('/') || config.prefix.ends_with('/') {
+        return true;
+    }
+
+    if config.upstreams.is_empty() {
+        return true;
+    }
+
+    for upstream in &config.upstreams {
+        if upstream.is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+// validate duplicates upstream prefix
+fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
+    let mut seen = HashSet::new();
+
+    for cluster in clusters {
+        if !seen.insert(&cluster.prefix) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn load_config() -> (
     ProxyRouter,
     Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>
 ){
     // Read config from the yaml
     let config = load_yaml("config.yaml");
+
+    // Validate if there is prefix duplication
+    match validate_duplicated_prefix(&config.clusters) {
+        true => panic!("found duplicated upstream prefix"),
+        false => {}
+    }
 
     // List of Built cluster for the main server
     let mut server_clusters = Vec::new();
@@ -71,6 +113,13 @@ pub fn load_config() -> (
 
     // Set up a cluster based on config
     for (idx, cluster_configuration) in config.clusters.iter().enumerate() {
+        // Validate cluster config
+        match validate_cluster_config(&cluster_configuration) {
+            true => panic!("invalid upstream configuration"),
+            false => {}
+        }
+
+        // Build cluster
         let cluster_service = build_cluster_service(
             &cluster_configuration.upstreams.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
         );
@@ -81,7 +130,8 @@ pub fn load_config() -> (
 
         // Add the prefix to the prefix list
         prefix_map.insert(cluster_configuration.prefix.clone(), idx);
-        println!("Setting up cluster: {}", idx + 1)
+
+        println!("Setting up {} upstream", cluster_configuration.name)
     }
 
     // Set the list of clusters into routes
