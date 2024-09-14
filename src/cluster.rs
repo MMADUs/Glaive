@@ -49,7 +49,7 @@ pub async fn select_cluster(
         }
         None => {
             session.respond_error(404).await.expect("Failed to respond with 404 error");
-            return true
+            return false
         }
     }
 
@@ -57,7 +57,7 @@ pub async fn select_cluster(
         println!("uri is empty.");
         // if modified uri is empty then just redirect to "/"
         session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
-        return false
+        return true
     }
 
     // parse the modified uri to a valid http uri
@@ -65,12 +65,12 @@ pub async fn select_cluster(
         Ok(new_uri) => {
             println!("New URI: {}", new_uri);
             session.req_header_mut().set_uri(new_uri);
-            false
+            true
         }
         Err(e) => {
             println!("URI parse error: {}", e);
             session.respond_error(400).await.expect("Failed to respond with 400 error");
-            true
+            false
         }
     }
 }
