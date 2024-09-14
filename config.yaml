@@ -3,11 +3,13 @@
 clusters:
   - name: one
     prefix: "/one"
+    rate_limit: 5
     upstreams:
-      - "host.docker.internal:3000"
-      - "host.docker.internal:3001"
+      - "localhost:3000"
+      - "localhost:3001"
   - name: two
     prefix: "/two"
+    rate_limit: 5
     upstreams:
-      - "host.docker.internal:3002"
-      - "host.docker.internal:3003"
+      - "localhost:3002"
+      - "localhost:3003"

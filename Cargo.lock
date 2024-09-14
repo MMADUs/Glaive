@@ -8,7 +8,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "http 1.1.0",
+ "once_cell",
  "pingora",
+ "pingora-limits",
  "serde",
  "serde_yaml 0.9.34+deprecated",
 ]
@@ -1223,6 +1225,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "324f14c8f90a534ce55c11dcbc88428f60a2540265f50b5ee7010561f45dd006"
 dependencies = [
  "crc32fast",
+]
+
+[[package]]
+name = "pingora-limits"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c9c71547553d90e99407e6a7304e41190019ec723c6bc36528225e17adfdf0b"
+dependencies = [
+ "ahash",
 ]
 
 [[package]]

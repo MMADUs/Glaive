@@ -1,37 +1,39 @@
-// Copyright (c) 2024-2025 ArcX, Inc.
-//
-// This file is part of ArcX Gateway
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+/**
+ * Copyright (c) 2024-2025 ArcX, Inc.
+ *
+ * This file is part of ArcX Gateway
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use pingora::lb::LoadBalancer;
-use pingora::prelude::{HttpPeer, RoundRobin};
+use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::{Result};
-
-use async_trait::async_trait;
 use pingora::http::ResponseHeader;
 
+use async_trait::async_trait;
+
 // utilities to select cluster
+use crate::config::ClusterMetadata;
 use crate::cluster::select_cluster;
+use crate::limiter::rate_limiter;
 
 // Main Struct as Router to implement ProxyHttp
 pub struct ProxyRouter {
-    pub clusters: Vec<Arc<LoadBalancer<RoundRobin>>>,
+    pub clusters: Vec<ClusterMetadata>,
     pub prefix_map: HashMap<String, usize>,
 }
 
@@ -46,9 +48,9 @@ impl ProxyHttp for ProxyRouter {
     type CTX = RouterCtx;
 
     // initial ctx values
-    fn new_ctx(&self) -> Self::CTX {
-        RouterCtx { cluster_address: 0 }
-    }
+    fn new_ctx(&self) -> Self::CTX { RouterCtx {
+        cluster_address: 0,
+    }}
 
     // fn fail_to_connect(
     //     &self,
@@ -65,7 +67,10 @@ impl ProxyHttp for ProxyRouter {
     //     e
     // }
 
-    // 3. third phase executed
+    /**
+    * The upstream_peer is the third phase that executes in the lifecycle
+    * if this lifecycle returns the http peer
+    */
     async fn upstream_peer(
         &self,
         session: &mut Session,
@@ -75,25 +80,19 @@ impl ProxyHttp for ProxyRouter {
         let cluster = &self.clusters[ctx.cluster_address];
 
         // Set up the upstream
-        let upstream = cluster.select(b"", 256).unwrap(); // Hash doesn't matter for round robin
+        let upstream = cluster.upstream.select(b"", 256).unwrap(); // Hash doesn't matter for round robin
         println!("upstream peer is: {:?}", upstream);
 
         // Set SNI to the cluster's host
-        let peer = Box::new(HttpPeer::new(upstream, false, "host.docker.internal".to_string()));
+        let peer = Box::new(HttpPeer::new(upstream, false, "localhost".to_string()));
         Ok(peer)
     }
 
-    // 1. the first phase executed
+    /**
+    * The request_filter is the first phase that executes in the lifecycle
+    * if this lifecycle returns true = the proxy stops | false = continue to upper lifecycle
+    */
     async fn request_filter(
-        &self,
-        session: &mut Session,
-        ctx: &mut Self::CTX,
-    ) -> Result<bool> {
-        Ok(false)
-    }
-
-    // 2. second phase executed
-    async fn proxy_upstream_filter(
         &self,
         session: &mut Session,
         ctx: &mut Self::CTX
@@ -106,13 +105,42 @@ impl ProxyHttp for ProxyRouter {
         let original_uri = cloned_req_header.uri.path();
         println!("original uri: {}", original_uri);
 
+        // result to consider if request should continue or stop
+        let mut result: bool = true;
+
         // select the cluster based on prefix
-        let result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+        result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+
+        // Select the cluster based on the selected index
+        let cluster = &self.clusters[ctx.cluster_address];
 
         println!("uri before send to upstream: {}", session.req_header().uri.path());
         println!("The value of my_bool is: {}", result);
 
+        // validate if rate limit exist from config
+        match cluster.rate_limit {
+            Some(limit) => {
+                // rate limit incoming request
+                result = rate_limiter(limit, session, ctx).await;
+            },
+            None => {}
+        }
         Ok(result)
+    }
+
+    /**
+    * The proxy_upstream_filter is the second phase that executes in the lifecycle
+    * if this lifecycle returns false = the proxy stops | true = continue to upper lifecycle
+    */
+    async fn proxy_upstream_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX
+    ) -> Result<bool>
+    where
+        Self::CTX: Send + Sync,
+    {
+        Ok(true)
     }
 
     // 5. fifth phase executed

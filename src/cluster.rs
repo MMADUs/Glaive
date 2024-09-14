@@ -1,22 +1,24 @@
-// Copyright (c) 2024-2025 ArcX, Inc.
-//
-// This file is part of ArcX Gateway
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+/**
+ * Copyright (c) 2024-2025 ArcX, Inc.
+ *
+ * This file is part of ArcX Gateway
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 use std::collections::HashMap;
-
+use pingora::http::ResponseHeader;
 use pingora::proxy::{Session};
 
 // router context
@@ -48,8 +50,9 @@ pub async fn select_cluster(
             ctx.cluster_address = idx;
         }
         None => {
-            session.respond_error(404).await.expect("Failed to respond with 404 error");
-            return false
+            let header = ResponseHeader::build(404, None).unwrap();
+            session.write_response_header(Box::new(header), true).await.unwrap();
+            return true
         }
     }
 
@@ -57,7 +60,7 @@ pub async fn select_cluster(
         println!("uri is empty.");
         // if modified uri is empty then just redirect to "/"
         session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
-        return true
+        return false
     }
 
     // parse the modified uri to a valid http uri
@@ -65,12 +68,13 @@ pub async fn select_cluster(
         Ok(new_uri) => {
             println!("New URI: {}", new_uri);
             session.req_header_mut().set_uri(new_uri);
-            true
+            false
         }
         Err(e) => {
             println!("URI parse error: {}", e);
-            session.respond_error(400).await.expect("Failed to respond with 400 error");
-            false
+            let header = ResponseHeader::build(400, None).unwrap();
+            session.write_response_header(Box::new(header), true).await.unwrap();
+            true
         }
     }
 }

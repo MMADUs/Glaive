@@ -13,7 +13,7 @@ ArcX in an API Gateway built on top of Pingora. Aims for simplicity, performance
 - [x] YAML Configuration
 - [x] Dynamic Routing
 - [ ] Retry & Timeout Mechanism
-- [ ] Rate Limiter
+- [x] Rate Limiter
 - [ ] Basic Key & Token Authentication
 - [ ] Built in external Authentication
 - [ ] Authorization

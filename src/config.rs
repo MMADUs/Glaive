@@ -1,22 +1,26 @@
-// Copyright (c) 2024-2025 ArcX, Inc.
-//
-// This file is part of ArcX Gateway
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+/**
+ * Copyright (c) 2024-2025 ArcX, Inc.
+ *
+ * This file is part of ArcX Gateway
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::sync::Arc;
+use std::time::Duration;
 
 use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
@@ -32,6 +36,7 @@ use crate::proxy::ProxyRouter;
 struct ClusterConfig {
     name: String,
     prefix: String,
+    rate_limit: Option<isize>,
     upstreams: Vec<String>,
 }
 
@@ -53,7 +58,7 @@ fn build_cluster_service(
 ) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
     let mut cluster = LoadBalancer::try_from_iter(upstreams).unwrap();
     cluster.set_health_check(TcpHealthCheck::new());
-    cluster.health_check_frequency = Some(std::time::Duration::from_secs(1));
+    cluster.health_check_frequency = Some(Duration::from_secs(1));
     background_service("cluster health check", cluster)
 }
 
@@ -91,6 +96,12 @@ fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
     false
 }
 
+pub struct ClusterMetadata {
+    pub name: String,
+    pub rate_limit: Option<isize>,
+    pub upstream: Arc<LoadBalancer<RoundRobin>>,
+}
+
 pub fn load_config() -> (
     ProxyRouter,
     Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>
@@ -108,7 +119,7 @@ pub fn load_config() -> (
     let mut server_clusters = Vec::new();
 
     // List of clusters and prefix for the proxy router
-    let mut clusters = Vec::new();
+    let mut clusters: Vec<ClusterMetadata> = Vec::new();
     let mut prefix_map = HashMap::new();
 
     // Set up a cluster based on config
@@ -124,8 +135,13 @@ pub fn load_config() -> (
             &cluster_configuration.upstreams.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
         );
 
-        // Add the cluster to the list
-        clusters.push(cluster_service.task());
+        // Add the cluster metadata to the cluster list
+        clusters.push( ClusterMetadata {
+            name: cluster_configuration.name.clone(),
+            rate_limit: cluster_configuration.rate_limit.clone(),
+            upstream: cluster_service.task(),
+        });
+        // push cluster to list
         server_clusters.push(cluster_service);
 
         // Add the prefix to the prefix list
