@@ -36,6 +36,7 @@ use crate::proxy::ProxyRouter;
 struct ClusterConfig {
     name: String,
     prefix: String,
+    host: String,
     rate_limit: Option<isize>,
     retry: Option<usize>,
     timeout: Option<u64>,
@@ -100,6 +101,7 @@ fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
 
 pub struct ClusterMetadata {
     pub name: String,
+    pub host: String,
     pub rate_limit: Option<isize>,
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
@@ -142,6 +144,7 @@ pub fn load_config() -> (
         // Add the cluster metadata to the cluster list
         clusters.push( ClusterMetadata {
             name: cluster_configuration.name.clone(),
+            host: cluster_configuration.host.clone(),
             rate_limit: cluster_configuration.rate_limit.clone(),
             retry: cluster_configuration.retry.clone(),
             timeout: cluster_configuration.timeout.clone(),

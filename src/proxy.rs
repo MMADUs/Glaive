@@ -71,7 +71,7 @@ impl ProxyHttp for ProxyRouter {
         println!("upstream peer is: {:?}", upstream);
 
         // Set SNI to the cluster's host
-        let mut peer = Box::new(HttpPeer::new(upstream, false, "localhost".to_string()));
+        let mut peer = Box::new(HttpPeer::new(upstream, false, cluster.host.clone()));
 
         // given the proxy timeout
         let timeout = cluster.timeout.unwrap_or(100);

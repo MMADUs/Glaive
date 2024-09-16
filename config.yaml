@@ -2,14 +2,20 @@
 
 clusters:
   - name: one
+    host: "localhost"
     prefix: "/one"
     rate_limit: 5
+    retry: 3
+    timeout: 2000
     upstreams:
       - "localhost:3000"
       - "localhost:3001"
   - name: two
+    host: "localhost"
     prefix: "/two"
     rate_limit: 5
+    retry: 3
+    timeout: 2000
     upstreams:
       - "localhost:3002"
       - "localhost:3003"
