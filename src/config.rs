@@ -37,6 +37,8 @@ struct ClusterConfig {
     name: String,
     prefix: String,
     rate_limit: Option<isize>,
+    retry: Option<usize>,
+    timeout: Option<u64>,
     upstreams: Vec<String>,
 }
 
@@ -99,6 +101,8 @@ fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
 pub struct ClusterMetadata {
     pub name: String,
     pub rate_limit: Option<isize>,
+    pub retry: Option<usize>,
+    pub timeout: Option<u64>,
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
 }
 
@@ -139,6 +143,8 @@ pub fn load_config() -> (
         clusters.push( ClusterMetadata {
             name: cluster_configuration.name.clone(),
             rate_limit: cluster_configuration.rate_limit.clone(),
+            retry: cluster_configuration.retry.clone(),
+            timeout: cluster_configuration.timeout.clone(),
             upstream: cluster_service.task(),
         });
         // push cluster to list

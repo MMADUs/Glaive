@@ -18,15 +18,15 @@
  */
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
-use pingora::{Result};
+use pingora::{Error, Result};
 use pingora::http::ResponseHeader;
 
 use async_trait::async_trait;
 
-// utilities to select cluster
 use crate::config::ClusterMetadata;
 use crate::cluster::select_cluster;
 use crate::limiter::rate_limiter;
@@ -40,6 +40,7 @@ pub struct ProxyRouter {
 // struct for proxy context
 pub struct RouterCtx {
     pub cluster_address: usize,
+    pub proxy_retry: usize,
 }
 
 #[async_trait]
@@ -50,22 +51,8 @@ impl ProxyHttp for ProxyRouter {
     // initial ctx values
     fn new_ctx(&self) -> Self::CTX { RouterCtx {
         cluster_address: 0,
+        proxy_retry: 0,
     }}
-
-    // fn fail_to_connect(
-    //     &self,
-    //     _session: &mut Session,
-    //     _peer: &HttpPeer,
-    //     ctx: &mut Self::CTX,
-    //     mut e: Box<Error>,
-    // ) -> Box<Error> {
-    //     if ctx.tries > 0 {
-    //         return e;
-    //     }
-    //     ctx.tries += 1;
-    //     e.set_retry(true);
-    //     e
-    // }
 
     /**
     * The upstream_peer is the third phase that executes in the lifecycle
@@ -73,18 +60,22 @@ impl ProxyHttp for ProxyRouter {
     */
     async fn upstream_peer(
         &self,
-        session: &mut Session,
+        _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
 
         // Set up the upstream
-        let upstream = cluster.upstream.select(b"", 256).unwrap(); // Hash doesn't matter for round robin
+        let upstream = cluster.upstream.select(b"", 256).unwrap(); // Hash doesn't matter for round_robin
         println!("upstream peer is: {:?}", upstream);
 
         // Set SNI to the cluster's host
-        let peer = Box::new(HttpPeer::new(upstream, false, "localhost".to_string()));
+        let mut peer = Box::new(HttpPeer::new(upstream, false, "localhost".to_string()));
+
+        // given the proxy timeout
+        let timeout = cluster.timeout.unwrap_or(100);
+        peer.options.connection_timeout = Some(Duration::from_millis(timeout));
         Ok(peer)
     }
 
@@ -134,8 +125,8 @@ impl ProxyHttp for ProxyRouter {
     */
     async fn proxy_upstream_filter(
         &self,
-        session: &mut Session,
-        ctx: &mut Self::CTX
+        _session: &mut Session,
+        _ctx: &mut Self::CTX
     ) -> Result<bool>
     where
         Self::CTX: Send + Sync,
@@ -157,6 +148,30 @@ impl ProxyHttp for ProxyRouter {
         upstream_response.remove_header("Content-Length");
         upstream_response.insert_header("Transfer-Encoding", "Chunked")?;
         Ok(())
+    }
+
+    /**
+    * The fail_to_connect is the phase that executes after upstream_peer
+    * in this lifecycle it checks if request can be retryable or error
+    */
+    fn fail_to_connect(
+        &self,
+        _session: &mut Session,
+        _peer: &HttpPeer,
+        ctx: &mut Self::CTX,
+        mut e: Box<Error>,
+    ) -> Box<Error> {
+        // Select the cluster based on the selected index
+        let cluster = &self.clusters[ctx.cluster_address];
+
+        // check if retry reach limits
+        if ctx.proxy_retry > cluster.retry.unwrap_or(1) {
+            return e;
+        }
+        // set to be retryable
+        ctx.proxy_retry += 1;
+        e.set_retry(true);
+        e
     }
 
     // async fn logging(
