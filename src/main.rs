@@ -17,32 +17,63 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-mod config;
 mod cluster;
+mod path;
 mod proxy;
 mod limiter;
+mod config;
 
+use std::collections::HashMap;
 use pingora::prelude::{Opt};
-use pingora::proxy::{http_proxy_service, ProxyHttp};
+use pingora::proxy::{http_proxy_service};
 use pingora::server::Server;
 
-use serde::Deserialize;
-
+use crate::cluster::{build_cluster, build_cluster_service, ClusterMetadata};
 use crate::config::load_config;
+use crate::proxy::ProxyRouter;
 
 fn main() {
     // Setup a server
     let opt = Opt::parse_args();
     let mut arc_server = Server::new(Some(opt)).unwrap();
+
+    // load configuration
+    let cluster_configuration = load_config(&mut arc_server.configuration);
     arc_server.bootstrap();
 
-    // load config
-    let (proxy_router, server_clusters) = load_config();
+    // if cluster configuration exist build the cluster
+    let proxy_router = match cluster_configuration {
+        Some(cluster_config) => {
+            let (proxy_router, server_clusters) = build_cluster(cluster_config);
 
-    // added every built cluster to arc server
-    for (_idx, cluster_service) in server_clusters.into_iter().enumerate() {
-        arc_server.add_service(cluster_service);
-    }
+            // added every built cluster to arc server
+            for (_idx, cluster_service) in server_clusters.into_iter().enumerate() {
+                arc_server.add_service(cluster_service);
+            }
+            proxy_router
+        },
+        None => {
+            let mut default_cluster: Vec<ClusterMetadata> = Vec::new();
+            let mut default_prefix = HashMap::new();
+            let default = build_cluster_service(&["0:0"]);
+            let metadata = ClusterMetadata{
+                name: "ArcX Gateway".to_string(),
+                host: "//default//".to_string(),
+                tls: false,
+                rate_limit: None,
+                retry: None,
+                timeout: None,
+                upstream: default.task(),
+            };
+            default_cluster.push(metadata);
+            default_prefix.insert("/".to_string(), 0);
+            let router = ProxyRouter{
+                clusters: default_cluster,
+                prefix_map: default_prefix,
+            };
+            router
+        }
+    };
 
     // Build the proxy with the list of clusters
     let mut router_service = http_proxy_service(&arc_server.configuration, proxy_router);

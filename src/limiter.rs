@@ -25,11 +25,11 @@ use pingora_limits::rate::Rate;
 
 use once_cell::sync::Lazy;
 
-// ctx router
 use crate::proxy::RouterCtx;
 
-// Rate limiter
-static RATE_LIMITER: Lazy<Rate> = Lazy::new(|| Rate::new(Duration::from_secs(10)));
+// Global config limiter refresh duration
+// Value is 60 seconds by default
+static RATE_LIMITER: Lazy<Rate> = Lazy::new(|| Rate::new(Duration::from_secs(60)));
 
 pub async fn rate_limiter(
     max_req_limit: isize,
@@ -46,6 +46,7 @@ pub async fn rate_limiter(
         Some(value) => value.to_string(),
         None => {
             let header = ResponseHeader::build(400, None).unwrap();
+            session.set_keepalive(None);
             session.write_response_header(Box::new(header), true).await.unwrap();
             return true
         }

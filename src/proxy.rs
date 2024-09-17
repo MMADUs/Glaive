@@ -23,12 +23,13 @@ use std::time::Duration;
 use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::{Error, Result};
-use pingora::http::ResponseHeader;
+use pingora::http::{ResponseHeader};
 
 use async_trait::async_trait;
-
-use crate::config::ClusterMetadata;
-use crate::cluster::select_cluster;
+use bytes::Bytes;
+use serde::Serialize;
+use crate::cluster::ClusterMetadata;
+use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
 
 // Main Struct as Router to implement ProxyHttp
@@ -41,6 +42,14 @@ pub struct ProxyRouter {
 pub struct RouterCtx {
     pub cluster_address: usize,
     pub proxy_retry: usize,
+}
+
+#[derive(Serialize)]
+struct Default {
+    server: String,
+    version: String,
+    message: String,
+    github: String,
 }
 
 #[async_trait]
@@ -69,13 +78,15 @@ impl ProxyHttp for ProxyRouter {
         // Set up the upstream
         let upstream = cluster.upstream.select(b"", 256).unwrap(); // Hash doesn't matter for round_robin
         println!("upstream peer is: {:?}", upstream);
+        println!("upstream tls: {:?}", cluster.tls);
 
         // Set SNI to the cluster's host
-        let mut peer = Box::new(HttpPeer::new(upstream, false, cluster.host.clone()));
+        let mut peer = Box::new(HttpPeer::new(upstream, cluster.tls, cluster.host.clone()));
 
         // given the proxy timeout
         let timeout = cluster.timeout.unwrap_or(100);
         peer.options.connection_timeout = Some(Duration::from_millis(timeout));
+        println!("send request to upstream");
         Ok(peer)
     }
 
@@ -97,7 +108,7 @@ impl ProxyHttp for ProxyRouter {
         println!("original uri: {}", original_uri);
 
         // result to consider if request should continue or stop
-        let mut result: bool = true;
+        let mut result: bool;
 
         // select the cluster based on prefix
         result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
@@ -107,6 +118,28 @@ impl ProxyHttp for ProxyRouter {
 
         println!("uri before send to upstream: {}", session.req_header().uri.path());
         println!("The value of my_bool is: {}", result);
+
+        // currently to handle default proxy when cluster does not exist on config
+        result = match cluster.host.starts_with("//default//") {
+            true => {
+                // response with 200 and body
+                let mut header = ResponseHeader::build(200, None)?;
+                header.insert_header("Content-Type", "application/json")?;
+                let body = Default{
+                    server: "ArcX API Gateway".to_string(),
+                    version: "2.0.0 Release".to_string(),
+                    message: "start configuring your gateway!".to_string(),
+                    github: "https://github.com/MMADUs/ArcX".to_string(),
+                };
+                let json_body = serde_json::to_string(&body).unwrap();
+                let body_bytes = Some(Bytes::from(json_body));
+                session.set_keepalive(None);
+                session.write_response_header(Box::new(header), true).await?;
+                session.write_response_body(body_bytes, true).await?;
+                true
+            }
+            false => { false }
+        };
 
         // validate if rate limit exist from config
         match cluster.rate_limit {

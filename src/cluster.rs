@@ -17,64 +17,141 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use std::collections::HashMap;
-use pingora::http::ResponseHeader;
-use pingora::proxy::{Session};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
 
-// router context
-use crate::proxy::RouterCtx;
+use pingora::lb::LoadBalancer;
+use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
+use pingora::services::background::GenBackgroundService;
 
-pub async fn select_cluster(
-    prefix_map: &HashMap<String, usize>,
-    original_uri: &str,
-    session: &mut Session,
-    ctx: &mut RouterCtx,
-) -> bool {
-    // create a uri to be modified
-    let mut modified_uri = original_uri.to_string();
+use serde::Deserialize;
 
-    // select the cluster address based on uri prefix
-    let cluster_idx_option = prefix_map
-        .iter()
-        .find(|(prefix, _)| original_uri.starts_with(prefix.as_str()))
-        .map(|(prefix, &idx)| {
-            modified_uri = original_uri.replacen(prefix, "", 1);
-            idx
+// main proxy router
+use crate::proxy::ProxyRouter;
+
+// Individual cluster from yaml
+#[derive(Debug, Deserialize)]
+pub struct ClusterConfig {
+    name: Option<String>,
+    prefix: Option<String>,
+    host: Option<String>,
+    tls: Option<bool>,
+    rate_limit: Option<isize>,
+    retry: Option<usize>,
+    timeout: Option<u64>,
+    upstream: Vec<String>,
+}
+
+// build the cluster
+pub fn build_cluster_service(
+    upstreams: &[&str],
+) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
+    let mut cluster = LoadBalancer::try_from_iter(upstreams).unwrap();
+    let hc = TcpHealthCheck::new();
+    cluster.set_health_check(hc);
+    cluster.health_check_frequency = Some(Duration::from_secs(1));
+    background_service("cluster health check", cluster)
+}
+
+// validate clusters configuration
+fn validate_cluster_config(config: &ClusterConfig) -> bool {
+    // mandatory cluster identity
+    if config.name.is_none() || config.prefix.is_none() || config.host.is_none() || config.tls.is_none() || config.upstream.is_empty() {
+        println!("CLUSTER IDENTITY ERROR");
+        return false;
+    }
+    // cluster prefix formatter
+    if let Some(prefix) = &config.prefix {
+        if prefix.is_empty() || !prefix.starts_with('/') || prefix.ends_with('/') {
+            println!("CLUSTER PREFIX ERROR");
+            return false;
+        }
+    }
+    // mandatory upstream check
+    for upstream in &config.upstream {
+        if upstream.is_empty() {
+            println!("CLUSTER UPSTREAM ERROR");
+            return false;
+        }
+    }
+    true
+}
+
+// validate duplicates upstream prefix
+fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
+    let mut seen = HashSet::new();
+    for cluster in clusters {
+        if !seen.insert(&cluster.prefix) {
+            return true;
+        }
+    }
+    false
+}
+
+pub struct ClusterMetadata {
+    pub name: String,
+    pub host: String,
+    pub tls: bool,
+    pub rate_limit: Option<isize>,
+    pub retry: Option<usize>,
+    pub timeout: Option<u64>,
+    pub upstream: Arc<LoadBalancer<RoundRobin>>,
+}
+
+pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
+    ProxyRouter,
+    Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>
+){
+    // Validate if there is prefix duplication
+    match validate_duplicated_prefix(&yaml_clusters_configuration) {
+        true => panic!("found duplicated upstream prefix"),
+        false => {}
+    }
+
+    // List of Built cluster for the main server
+    let mut server_clusters = Vec::new();
+
+    // List of clusters and prefix for the proxy router
+    let mut clusters: Vec<ClusterMetadata> = Vec::new();
+    let mut prefix_map = HashMap::new();
+
+    // Set up a cluster based on config
+    for (idx, cluster_conf) in yaml_clusters_configuration.into_iter().enumerate() {
+        // Validate cluster config
+        match validate_cluster_config(&cluster_conf) {
+            true => {},
+            false => panic!("invalid upstream configuration")
+        }
+
+        // Build cluster
+        let cluster_service = build_cluster_service(
+            &cluster_conf.upstream.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        );
+
+        // Add the cluster metadata to the cluster list
+        clusters.push( ClusterMetadata {
+            name: cluster_conf.name.unwrap(),
+            host: cluster_conf.host.unwrap(),
+            tls: cluster_conf.tls.unwrap(),
+            rate_limit: cluster_conf.rate_limit,
+            retry: cluster_conf.retry,
+            timeout: cluster_conf.timeout,
+            upstream: cluster_service.task(),
         });
+        // push cluster to list
+        server_clusters.push(cluster_service);
 
-    // check if cluster address exist
-    match cluster_idx_option {
-        Some(idx) => {
-            // if exist modify cluster address to the selected address
-            println!("Cluster idx: {}", idx);
-            ctx.cluster_address = idx;
-        }
-        None => {
-            let header = ResponseHeader::build(404, None).unwrap();
-            session.write_response_header(Box::new(header), true).await.unwrap();
-            return true
-        }
+        // Add the prefix to the prefix list
+        prefix_map.insert(cluster_conf.prefix.unwrap().clone(), idx);
     }
 
-    if modified_uri.is_empty() {
-        println!("uri is empty.");
-        // if modified uri is empty then just redirect to "/"
-        session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
-        return false
-    }
+    // Set the list of clusters into routes
+    let main_router = ProxyRouter{
+        clusters,
+        prefix_map,
+    };
 
-    // parse the modified uri to a valid http uri
-    match modified_uri.parse::<http::Uri>() {
-        Ok(new_uri) => {
-            println!("New URI: {}", new_uri);
-            session.req_header_mut().set_uri(new_uri);
-            false
-        }
-        Err(e) => {
-            println!("URI parse error: {}", e);
-            let header = ResponseHeader::build(400, None).unwrap();
-            session.write_response_header(Box::new(header), true).await.unwrap();
-            true
-        }
-    }
+    // return both
+    (main_router, server_clusters)
 }

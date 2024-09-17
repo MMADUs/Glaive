@@ -3,19 +3,21 @@
 clusters:
   - name: one
     host: "localhost"
+    tls: false
     prefix: "/one"
     rate_limit: 5
     retry: 3
     timeout: 2000
-    upstreams:
+    upstream:
       - "localhost:3000"
       - "localhost:3001"
   - name: two
     host: "localhost"
+    tls: false
     prefix: "/two"
     rate_limit: 5
     retry: 3
     timeout: 2000
-    upstreams:
+    upstream:
       - "localhost:3002"
       - "localhost:3003"

@@ -17,154 +17,154 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::sync::Arc;
-use std::time::Duration;
-
-use pingora::lb::LoadBalancer;
-use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
-use pingora::services::background::GenBackgroundService;
-
+use pingora::server::configuration::ServerConf;
 use serde::Deserialize;
+use crate::cluster::ClusterConfig;
 
-// main proxy router
-use crate::proxy::ProxyRouter;
-
-// Individual cluster from yaml
 #[derive(Debug, Deserialize)]
-struct ClusterConfig {
-    name: String,
-    prefix: String,
-    host: String,
-    rate_limit: Option<isize>,
-    retry: Option<usize>,
-    timeout: Option<u64>,
-    upstreams: Vec<String>,
-}
-
-// Config struct from yaml
-#[derive(Debug, Deserialize)]
-struct Config {
-    clusters: Vec<ClusterConfig>,
+struct Configuration {
+    /// Version
+    pub version: Option<usize>,
+    /// Whether to run this process in the background.
+    pub daemon: Option<bool>,
+    /// When configured and `daemon` setting is `true`, error log will be written to the given
+    /// file. Otherwise StdErr will be used.
+    pub error_log: Option<String>,
+    /// The pid (process ID) file of this server to be created when running in background
+    pub pid_file: Option<String>,
+    /// the path to the upgrade socket
+    ///
+    /// In order to perform zero downtime restart, both the new and old process need to agree on the
+    /// path to this sock in order to coordinate the upgrade.
+    pub upgrade_sock: Option<String>,
+    /// If configured, after daemonization, this process will switch to the given user before
+    /// starting to serve traffic.
+    pub user: Option<String>,
+    /// Similar to `user`, the group this process should switch to.
+    pub group: Option<String>,
+    /// How many threads **each** service should get. The threads are not shared across services.
+    pub threads: Option<usize>,
+    /// Allow work stealing between threads of the same service. Default `true`.
+    pub work_stealing: Option<bool>,
+    /// The path to CA file the SSL library should use. If empty, the default trust store location
+    /// defined by the SSL library will be used.
+    pub ca_file: Option<String>,
+    /// Grace period in seconds before starting the final step of the graceful shutdown after signaling shutdown.
+    pub grace_period_seconds: Option<u64>,
+    /// Timeout in seconds of the final step for the graceful shutdown.
+    pub graceful_shutdown_timeout_seconds: Option<u64>,
+    // These options don't belong here as they are specific to certain services
+    /// IPv4 addresses for a client connector to bind to. See [`ConnectorOptions`].
+    /// Note: this is an _unstable_ field that may be renamed or removed in the future.
+    pub client_bind_to_ipv4: Option<Vec<String>>,
+    /// IPv6 addresses for a client connector to bind to. See [`ConnectorOptions`].
+    /// Note: this is an _unstable_ field that may be renamed or removed in the future.
+    pub client_bind_to_ipv6: Option<Vec<String>>,
+    /// Keepalive pool size for client connections to upstream. See [`ConnectorOptions`].
+    /// Note: this is an _unstable_ field that may be renamed or removed in the future.
+    pub upstream_keepalive_pool_size: Option<usize>,
+    /// Number of dedicated thread pools to use for upstream connection establishment.
+    /// See [`ConnectorOptions`].
+    /// Note: this is an _unstable_ field that may be renamed or removed in the future.
+    pub upstream_connect_offload_threadpools: Option<usize>,
+    /// Number of threads per dedicated upstream connection establishment pool.
+    /// See [`ConnectorOptions`].
+    /// Note: this is an _unstable_ field that may be renamed or removed in the future.
+    pub upstream_connect_offload_thread_per_pool: Option<usize>,
+    /// When enabled allows TLS keys to be written to a file specified by the SSLKEYLOG
+    /// env variable. This can be used by tools like Wireshark to decrypt upstream traffic
+    /// for debugging purposes.
+    /// Note: this is an _unstable_ field that may be renamed or removed in the future.
+    pub upstream_debug_ssl_keylog: Option<bool>,
+    /// Upper stream Cluster Configurations
+    pub clusters: Option<Vec<ClusterConfig>>,
 }
 
 // load config from yaml
-fn load_yaml(file_path: &str) -> Config {
-    let file = File::open(file_path).expect("Unable to open the file");
+fn load_yaml(file_path: &str) -> Configuration {
+    let file = File::open(file_path).expect("Unable to find configuration file.");
     serde_yaml::from_reader(file).expect("Unable to parse YAML")
 }
 
-// build the cluster
-fn build_cluster_service(
-    upstreams: &[&str],
-) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
-    let mut cluster = LoadBalancer::try_from_iter(upstreams).unwrap();
-    cluster.set_health_check(TcpHealthCheck::new());
-    cluster.health_check_frequency = Some(Duration::from_secs(1));
-    background_service("cluster health check", cluster)
-}
-
-// validate clusters configuration
-fn validate_cluster_config(config: &ClusterConfig) -> bool {
-    if config.name.is_empty() {
-        return true;
-    }
-
-    if config.prefix.is_empty() || !config.prefix.starts_with('/') || config.prefix.ends_with('/') {
-        return true;
-    }
-
-    if config.upstreams.is_empty() {
-        return true;
-    }
-
-    for upstream in &config.upstreams {
-        if upstream.is_empty() {
-            return true;
-        }
-    }
-    false
-}
-
-// validate duplicates upstream prefix
-fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
-    let mut seen = HashSet::new();
-
-    for cluster in clusters {
-        if !seen.insert(&cluster.prefix) {
-            return true;
-        }
-    }
-    false
-}
-
-pub struct ClusterMetadata {
-    pub name: String,
-    pub host: String,
-    pub rate_limit: Option<isize>,
-    pub retry: Option<usize>,
-    pub timeout: Option<u64>,
-    pub upstream: Arc<LoadBalancer<RoundRobin>>,
-}
-
-pub fn load_config() -> (
-    ProxyRouter,
-    Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>
-){
-    // Read config from the yaml
+pub fn load_config(server_config: &mut Arc<ServerConf>) -> Option<Vec<ClusterConfig>> {
     let config = load_yaml("config.yaml");
+    let server_config = Arc::get_mut(server_config)?;
 
-    // Validate if there is prefix duplication
-    match validate_duplicated_prefix(&config.clusters) {
-        true => panic!("found duplicated upstream prefix"),
-        false => {}
+    // version
+    if let Some(version) = config.version {
+        server_config.version = version.clone();
+    }
+    // daemon
+    if let Some(daemon) = config.daemon {
+        server_config.daemon = daemon.clone();
+    }
+    // error log
+    if let Some(error_log) = config.error_log {
+        server_config.error_log = Some(error_log.clone());
+    }
+    // pid file
+    if let Some(pid_file) = config.pid_file {
+        server_config.pid_file = pid_file.clone();
+    }
+    // upgrade sock
+    if let Some(upgrade_sock) = config.upgrade_sock {
+        server_config.upgrade_sock = upgrade_sock.clone();
+    }
+    // user
+    if let Some(user) = config.user {
+        server_config.user = Some(user.clone());
+    }
+    // group
+    if let Some(group) = config.group {
+        server_config.group = Some(group.clone());
+    }
+    // threads
+    if let Some(threads) = config.threads {
+        server_config.threads = threads.clone();
+    }
+    // work stealing
+    if let Some(work_stealing) = config.work_stealing {
+        server_config.work_stealing = work_stealing.clone();
+    }
+    // ca file
+    if let Some(ca_file) = config.ca_file {
+        server_config.ca_file = Some(ca_file.clone());
+    }
+    // grace period
+    if let Some(grace_period_seconds) = config.grace_period_seconds {
+        server_config.grace_period_seconds = Some(grace_period_seconds.clone());
+    }
+    // graceful shutdown
+    if let Some(graceful_shutdown_timeout_seconds) = config.graceful_shutdown_timeout_seconds {
+        server_config.graceful_shutdown_timeout_seconds = Some(graceful_shutdown_timeout_seconds.clone());
+    }
+    // client bind ipv4
+    if let Some(client_bind_to_ipv4) = config.client_bind_to_ipv4 {
+        server_config.client_bind_to_ipv4 = client_bind_to_ipv4.clone();
+    }
+    // client bind ipv6
+    if let Some(client_bind_to_ipv6) = config.client_bind_to_ipv6 {
+        server_config.client_bind_to_ipv6 = client_bind_to_ipv6.clone();
+    }
+    // upstream keep alive pool
+    if let Some(upstream_keepalive_pool_size) = config.upstream_keepalive_pool_size {
+        server_config.upstream_keepalive_pool_size = upstream_keepalive_pool_size.clone();
+    }
+    // upstream connect threadpools
+    if let Some(upstream_connect_offload_threadpools) = config.upstream_connect_offload_threadpools {
+        server_config.upstream_connect_offload_threadpools = Some(upstream_connect_offload_threadpools.clone());
+    }
+    // upstream connect thread per pool
+    if let Some(upstream_connect_offload_thread_per_pool) = config.upstream_connect_offload_thread_per_pool {
+        server_config.upstream_connect_offload_thread_per_pool = Some(upstream_connect_offload_thread_per_pool.clone());
+    }
+    // debug ssl keylog
+    if let Some(upstream_debug_ssl_keylog) = config.upstream_debug_ssl_keylog {
+        server_config.upstream_debug_ssl_keylog = upstream_debug_ssl_keylog.clone();
     }
 
-    // List of Built cluster for the main server
-    let mut server_clusters = Vec::new();
-
-    // List of clusters and prefix for the proxy router
-    let mut clusters: Vec<ClusterMetadata> = Vec::new();
-    let mut prefix_map = HashMap::new();
-
-    // Set up a cluster based on config
-    for (idx, cluster_configuration) in config.clusters.iter().enumerate() {
-        // Validate cluster config
-        match validate_cluster_config(&cluster_configuration) {
-            true => panic!("invalid upstream configuration"),
-            false => {}
-        }
-
-        // Build cluster
-        let cluster_service = build_cluster_service(
-            &cluster_configuration.upstreams.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        );
-
-        // Add the cluster metadata to the cluster list
-        clusters.push( ClusterMetadata {
-            name: cluster_configuration.name.clone(),
-            host: cluster_configuration.host.clone(),
-            rate_limit: cluster_configuration.rate_limit.clone(),
-            retry: cluster_configuration.retry.clone(),
-            timeout: cluster_configuration.timeout.clone(),
-            upstream: cluster_service.task(),
-        });
-        // push cluster to list
-        server_clusters.push(cluster_service);
-
-        // Add the prefix to the prefix list
-        prefix_map.insert(cluster_configuration.prefix.clone(), idx);
-
-        println!("Setting up {} upstream", cluster_configuration.name)
-    }
-
-    // Set the list of clusters into routes
-    let main_router = ProxyRouter{
-        clusters,
-        prefix_map,
-    };
-
-    // return both
-    (main_router, server_clusters)
+    // return clusters
+    config.clusters
 }
