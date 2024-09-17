@@ -15,13 +15,15 @@ ArcX in an API Gateway built on top of Pingora. Aims for simplicity, performance
 - [x] Retry & Timeout Mechanism
 - [x] Rate Limiter
 - [ ] CORS Policy
+- [ ] Circuit Breaking
 - [ ] Basic Key & Token Authentication
 - [ ] Built in external Authentication
 - [ ] Authorization
 - [ ] Consul Service Discovery
 - [ ] Logging info & error
 - [ ] Metrics with Prometheus
-- [ ] API Swagger
+- [ ] Centralized Swagger
 - [ ] SSL Termination
 - [ ] Cache Layer
 - [ ] gRPC Support
+- [ ] Kubernetes ingress compatibility
