@@ -37,15 +37,15 @@ fn main() {
     let opt = Opt::parse_args();
     let mut arc_server = Server::new(Some(opt)).unwrap();
 
-    // load configuration
+    // load configuration and merge to server configuration
     let cluster_configuration = load_config(&mut arc_server.configuration);
     arc_server.bootstrap();
 
-    // if cluster configuration exist build the cluster
+    // checks the cluster configuration existence and build the cluster
     let proxy_router = match cluster_configuration {
         Some(cluster_config) => {
+            // build the entire cluster from the configuration
             let (proxy_router, server_clusters) = build_cluster(cluster_config);
-
             // added every built cluster to arc server
             for (_idx, cluster_service) in server_clusters.into_iter().enumerate() {
                 arc_server.add_service(cluster_service);
@@ -53,6 +53,7 @@ fn main() {
             proxy_router
         },
         None => {
+            // the default prefix if none of cluster exist.
             let mut default_cluster: Vec<ClusterMetadata> = Vec::new();
             let mut default_prefix = HashMap::new();
             let default = build_cluster_service(&["0:0"]);
@@ -77,10 +78,8 @@ fn main() {
 
     // Build the proxy with the list of clusters
     let mut router_service = http_proxy_service(&arc_server.configuration, proxy_router);
-
     // Proxy server port
     router_service.add_tcp("0.0.0.0:6188");
-
     // Set the proxy to the server
     arc_server.add_service(router_service);
     arc_server.run_forever();

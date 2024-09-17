@@ -54,7 +54,6 @@ pub async fn rate_limiter(
 
     // retrieve the current window requests
     let curr_window_requests = RATE_LIMITER.observe(&appid, 1);
-
     // if rate limit exceed
     if curr_window_requests > max_req_limit {
         // rate limited, return 429

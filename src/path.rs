@@ -18,10 +18,10 @@
  */
 
 use std::collections::HashMap;
+
 use pingora::http::ResponseHeader;
 use pingora::proxy::{Session};
 
-// router context
 use crate::proxy::RouterCtx;
 
 pub async fn select_cluster(
@@ -57,6 +57,7 @@ pub async fn select_cluster(
         }
     }
 
+    // checks for empty modified uri
     if modified_uri.is_empty() {
         println!("uri is empty.");
         // if modified uri is empty then just redirect to "/"

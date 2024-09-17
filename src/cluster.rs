@@ -27,10 +27,9 @@ use pingora::services::background::GenBackgroundService;
 
 use serde::Deserialize;
 
-// main proxy router
 use crate::proxy::ProxyRouter;
 
-// Individual cluster from yaml
+// Raw individual cluster configuration
 #[derive(Debug, Deserialize)]
 pub struct ClusterConfig {
     name: Option<String>,
@@ -43,11 +42,13 @@ pub struct ClusterConfig {
     upstream: Vec<String>,
 }
 
-// build the cluster
+// build the cluster with hardcoded upstream
 pub fn build_cluster_service(
     upstreams: &[&str],
 ) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
     let mut cluster = LoadBalancer::try_from_iter(upstreams).unwrap();
+    // upstream health check
+    // frequency is set to every 1 second by default
     let hc = TcpHealthCheck::new();
     cluster.set_health_check(hc);
     cluster.health_check_frequency = Some(Duration::from_secs(1));
@@ -61,7 +62,7 @@ fn validate_cluster_config(config: &ClusterConfig) -> bool {
         println!("CLUSTER IDENTITY ERROR");
         return false;
     }
-    // cluster prefix formatter
+    // mandatory cluster prefix formatter
     if let Some(prefix) = &config.prefix {
         if prefix.is_empty() || !prefix.starts_with('/') || prefix.ends_with('/') {
             println!("CLUSTER PREFIX ERROR");
@@ -89,6 +90,8 @@ fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
     false
 }
 
+// cluster metadata is mandatory
+// the metadata is used for configuring upstream cluster
 pub struct ClusterMetadata {
     pub name: String,
     pub host: String,
@@ -99,6 +102,7 @@ pub struct ClusterMetadata {
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
 }
 
+// build the entire cluster from the configuration
 pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
     ProxyRouter,
     Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>
@@ -111,7 +115,6 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
 
     // List of Built cluster for the main server
     let mut server_clusters = Vec::new();
-
     // List of clusters and prefix for the proxy router
     let mut clusters: Vec<ClusterMetadata> = Vec::new();
     let mut prefix_map = HashMap::new();
@@ -141,7 +144,6 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
         });
         // push cluster to list
         server_clusters.push(cluster_service);
-
         // Add the prefix to the prefix list
         prefix_map.insert(cluster_conf.prefix.unwrap().clone(), idx);
     }
@@ -151,7 +153,6 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
         clusters,
         prefix_map,
     };
-
     // return both
     (main_router, server_clusters)
 }

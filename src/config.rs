@@ -88,7 +88,10 @@ fn load_yaml(file_path: &str) -> Configuration {
     serde_yaml::from_reader(file).expect("Unable to parse YAML")
 }
 
-pub fn load_config(server_config: &mut Arc<ServerConf>) -> Option<Vec<ClusterConfig>> {
+// load config from yaml and merge to server configuration
+pub fn load_config(
+    server_config: &mut Arc<ServerConf>,
+) -> Option<Vec<ClusterConfig>> {
     let config = load_yaml("config.yaml");
     let server_config = Arc::get_mut(server_config)?;
 
