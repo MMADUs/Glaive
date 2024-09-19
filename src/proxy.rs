@@ -45,6 +45,7 @@ pub struct RouterCtx {
     pub proxy_retry: usize,
 }
 
+// the struct for default proxy response
 #[derive(Serialize)]
 struct Default {
     server: String,

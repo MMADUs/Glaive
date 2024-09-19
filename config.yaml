@@ -1,5 +1,26 @@
-# config example
-
+# gateway configuration
+#version: 2
+#daemon: true
+#error_log: true
+#pid_file: "path to process id file"
+#upgrade_sock: "path to upgrade socket"
+#user: "user"
+#group: "group"
+#threads: 10
+#work_stealing: true
+#ca_file: "path to ca file"
+#grace_period_seconds: 10
+#graceful_shutdown_timeout: 10
+#client_bind_to_ipv4:
+#  - "address"
+#  - "address"
+#client_bind_to_ipv6:
+#  - "address"
+#  - "address"
+#upstream_keepalive_pool_size: 1000
+#upstream_connect_offload_threadpools: 100
+#upstream_connect_offload_thread_per_pool: 100
+#upstream_debug_ssl_keylog: true
 clusters:
   - name: one
     host: "localhost"

@@ -22,16 +22,20 @@ mod path;
 mod proxy;
 mod limiter;
 mod config;
+mod auth;
+mod discovery;
 
 use std::collections::HashMap;
-use pingora::prelude::{Opt};
-use pingora::proxy::{http_proxy_service};
+
+use pingora::prelude::Opt;
+use pingora::proxy::http_proxy_service;
 use pingora::server::Server;
 
 use crate::cluster::{build_cluster, build_cluster_service, ClusterMetadata};
 use crate::config::load_config;
 use crate::proxy::ProxyRouter;
 
+// #[tokio::main]
 fn main() {
     // Setup a server
     let opt = Opt::parse_args();
@@ -40,6 +44,12 @@ fn main() {
     // load configuration and merge to server configuration
     let cluster_configuration = load_config(&mut arc_server.configuration);
     arc_server.bootstrap();
+
+    // discovery test
+    let consul_client = discovery::new_consul_connection();
+    let (lb, updater) = discovery::build_cluster_discovery(consul_client, "catalog-service".to_string());
+    arc_server.add_service(lb);
+    arc_server.add_service(updater);
 
     // checks the cluster configuration existence and build the cluster
     let proxy_router = match cluster_configuration {

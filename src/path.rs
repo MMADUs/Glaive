@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 
 use pingora::http::ResponseHeader;
-use pingora::proxy::{Session};
+use pingora::proxy::Session;
 
 use crate::proxy::RouterCtx;
 
