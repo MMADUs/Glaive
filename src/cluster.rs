@@ -36,6 +36,7 @@ pub struct ClusterConfig {
     prefix: Option<String>,
     host: Option<String>,
     tls: Option<bool>,
+    discovery: Option<bool>,
     rate_limit: Option<isize>,
     retry: Option<usize>,
     timeout: Option<u64>,
