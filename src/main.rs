@@ -33,6 +33,7 @@ use pingora::server::Server;
 
 use crate::cluster::{build_cluster, build_cluster_service, ClusterMetadata};
 use crate::config::load_config;
+use crate::discovery::Discovery;
 use crate::proxy::ProxyRouter;
 
 // #[tokio::main]
@@ -46,10 +47,13 @@ fn main() {
     arc_server.bootstrap();
 
     // discovery test
-    let consul_client = discovery::new_consul_connection();
-    let (lb, updater) = discovery::build_cluster_discovery(consul_client, "catalog-service".to_string());
-    arc_server.add_service(lb);
-    arc_server.add_service(updater);
+    let discovery = Discovery::new_consul_discovery();
+    let (cluster1, updater1) = discovery.build_cluster_discovery("catalog-service".to_string());
+    arc_server.add_service(cluster1);
+    arc_server.add_service(updater1);
+    let (cluster2, updater2) = discovery.build_cluster_discovery("catalog-service".to_string());
+    arc_server.add_service(cluster2);
+    arc_server.add_service(updater2);
 
     // checks the cluster configuration existence and build the cluster
     let proxy_router = match cluster_configuration {

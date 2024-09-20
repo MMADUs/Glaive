@@ -19,5 +19,5 @@ tracing = "0.1"
 jsonwebtoken = "9.3.0"
 dotenv = "0.15"
 validator = { version = "0.18.1", features = ["derive"] }
-consulrs = "0.1.0"
+rs-consul = "0.7.0"
 tokio = { version = "1.40.0", features = ["rt", "rt-multi-thread", "macros"] }
