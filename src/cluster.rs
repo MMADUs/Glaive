@@ -26,8 +26,9 @@ use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
 
 use serde::Deserialize;
-
+use crate::discovery;
 use crate::proxy::ProxyRouter;
+use crate::discovery::{Discovery, DiscoveryBackgroundService};
 
 // Raw individual cluster configuration
 #[derive(Debug, Deserialize)]
@@ -36,11 +37,17 @@ pub struct ClusterConfig {
     prefix: Option<String>,
     host: Option<String>,
     tls: Option<bool>,
-    discovery: Option<bool>,
+    discovery: Option<DiscoveryConfig>,
     rate_limit: Option<isize>,
     retry: Option<usize>,
     timeout: Option<u64>,
     upstream: Vec<String>,
+}
+// Discovery configuration
+#[derive(Debug, Deserialize)]
+pub struct DiscoveryConfig {
+    name: Option<String>,
+    passing: Option<bool>,
 }
 
 // build the cluster with hardcoded upstream
@@ -91,6 +98,12 @@ fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
     false
 }
 
+// Validate if any cluster has a discovery configuration
+fn has_discovery_enabled(clusters: &[ClusterConfig]) -> bool {
+    // Return true if any cluster has discovery configuration
+    clusters.iter().any(|cluster| cluster.discovery.is_some())
+}
+
 // cluster metadata is mandatory
 // the metadata is used for configuring upstream cluster
 pub struct ClusterMetadata {
@@ -106,7 +119,8 @@ pub struct ClusterMetadata {
 // build the entire cluster from the configuration
 pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
     ProxyRouter,
-    Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>
+    Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>,
+    Vec<GenBackgroundService<DiscoveryBackgroundService>>,
 ){
     // Validate if there is prefix duplication
     match validate_duplicated_prefix(&yaml_clusters_configuration) {
@@ -114,8 +128,20 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
         false => {}
     }
 
-    // List of Built cluster for the main server
-    let mut server_clusters = Vec::new();
+    // validate if some of the config uses discovery
+    // then create the discovery instances
+    let discovery = match has_discovery_enabled(&yaml_clusters_configuration) {
+        true => {
+            println!("discovery found! creating consul connection...");
+            Some(Discovery::new_consul_discovery())
+        }
+        false => None
+    };
+
+    // List of Built process added as background processing
+    let mut cluster_background_process = Vec::new();
+    let mut updater_background_process = Vec::new();
+
     // List of clusters and prefix for the proxy router
     let mut clusters: Vec<ClusterMetadata> = Vec::new();
     let mut prefix_map = HashMap::new();
@@ -128,10 +154,21 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
             false => panic!("invalid upstream configuration")
         }
 
-        // Build cluster
-        let cluster_service = build_cluster_service(
-            &cluster_conf.upstream.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        );
+        // Check if the cluster uses discovery
+        let cluster_service = if let Some(discovery_conf) = cluster_conf.discovery {
+            println!("found discovery in cluster yaml...");
+            // Ensure discovery has been initialized
+            let disc = discovery.as_ref().expect("Discovery is enabled but consul discovery is not created");
+            let (cluster, updater) = disc.build_cluster_discovery(discovery_conf.name.unwrap());
+            updater_background_process.push(updater);
+            cluster
+        } else {
+            println!("built default cluster");
+            // Build default hardcoded http cluster
+            build_cluster_service(
+                &cluster_conf.upstream.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            )
+        };
 
         // Add the cluster metadata to the cluster list
         clusters.push( ClusterMetadata {
@@ -144,7 +181,7 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
             upstream: cluster_service.task(),
         });
         // push cluster to list
-        server_clusters.push(cluster_service);
+        cluster_background_process.push(cluster_service);
         // Add the prefix to the prefix list
         prefix_map.insert(cluster_conf.prefix.unwrap().clone(), idx);
     }
@@ -154,6 +191,6 @@ pub fn build_cluster(yaml_clusters_configuration: Vec<ClusterConfig>) -> (
         clusters,
         prefix_map,
     };
-    // return both
-    (main_router, server_clusters)
+    // return all
+    (main_router, cluster_background_process, updater_background_process)
 }

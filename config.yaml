@@ -25,8 +25,11 @@ clusters:
   - name: one
     host: "localhost"
     tls: false
+    discovery:
+      name: "test-service"
+      passing: true
     prefix: "/one"
-    rate_limit: 5
+    rate_limit: 200
     retry: 3
     timeout: 2000
     upstream:
@@ -36,9 +39,9 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/two"
-    rate_limit: 5
+    rate_limit: 200
     retry: 3
     timeout: 2000
     upstream:
-      - "localhost:3002"
-      - "localhost:3003"
+      - "localhost:8000"
+      - "localhost:8001"

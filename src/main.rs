@@ -33,7 +33,6 @@ use pingora::server::Server;
 
 use crate::cluster::{build_cluster, build_cluster_service, ClusterMetadata};
 use crate::config::load_config;
-use crate::discovery::Discovery;
 use crate::proxy::ProxyRouter;
 
 // #[tokio::main]
@@ -46,23 +45,27 @@ fn main() {
     let cluster_configuration = load_config(&mut arc_server.configuration);
     arc_server.bootstrap();
 
-    // discovery test
-    let discovery = Discovery::new_consul_discovery();
-    let (cluster1, updater1) = discovery.build_cluster_discovery("catalog-service".to_string());
-    arc_server.add_service(cluster1);
-    arc_server.add_service(updater1);
-    let (cluster2, updater2) = discovery.build_cluster_discovery("catalog-service".to_string());
-    arc_server.add_service(cluster2);
-    arc_server.add_service(updater2);
+    // // discovery test
+    // let discovery = Discovery::new_consul_discovery();
+    // let (cluster1, updater1) = discovery.build_cluster_discovery("catalog-service".to_string());
+    // arc_server.add_service(cluster1);
+    // arc_server.add_service(updater1);
+    // let (cluster2, updater2) = discovery.build_cluster_discovery("catalog-service".to_string());
+    // arc_server.add_service(cluster2);
+    // arc_server.add_service(updater2);
 
     // checks the cluster configuration existence and build the cluster
     let proxy_router = match cluster_configuration {
         Some(cluster_config) => {
             // build the entire cluster from the configuration
-            let (proxy_router, server_clusters) = build_cluster(cluster_config);
-            // added every built cluster to arc server
-            for (_idx, cluster_service) in server_clusters.into_iter().enumerate() {
+            let (proxy_router, clusters, updaters) = build_cluster(cluster_config);
+            // added every cluster background process to arc server
+            for (_idx, cluster_service) in clusters.into_iter().enumerate() {
                 arc_server.add_service(cluster_service);
+            }
+            // added every updater background process to arc server
+            for (_idx, updater_process) in updaters.into_iter().enumerate() {
+                arc_server.add_service(updater_process);
             }
             proxy_router
         },
