@@ -19,7 +19,7 @@ ArcX in an API Gateway built on top of Pingora. Aims for simplicity, performance
 - [ ] Basic Key & Token Authentication
 - [ ] Built in external Authentication
 - [ ] Authorization
-- [ ] Consul Service Discovery
+- [x] Consul Service Discovery
 - [ ] Logging info & error
 - [ ] Metrics with Prometheus
 - [ ] Centralized Swagger
