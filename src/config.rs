@@ -82,7 +82,7 @@ struct Configuration {
     pub clusters: Option<Vec<ClusterConfig>>,
 }
 
-// load config from yaml
+// parse yaml file to configuration based on provided path
 fn load_yaml(file_path: &str) -> Configuration {
     let file = File::open(file_path).expect("Unable to find configuration file.");
     serde_yaml::from_reader(file).expect("Unable to parse YAML")
@@ -92,6 +92,8 @@ fn load_yaml(file_path: &str) -> Configuration {
 pub fn load_config(
     server_config: &mut Arc<ServerConf>,
 ) -> Option<Vec<ClusterConfig>> {
+    // load and parse the yaml file as configuration
+    // TODO: the file path should be configurable soon.
     let config = load_yaml("config.yaml");
     let server_config = Arc::get_mut(server_config)?;
 
@@ -167,7 +169,6 @@ pub fn load_config(
     if let Some(upstream_debug_ssl_keylog) = config.upstream_debug_ssl_keylog {
         server_config.upstream_debug_ssl_keylog = upstream_debug_ssl_keylog.clone();
     }
-
     // return clusters
     config.clusters
 }
