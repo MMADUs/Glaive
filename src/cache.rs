@@ -18,8 +18,8 @@
  */
 
 use std::any::Any;
-use std::fmt::Debug;
 use std::sync::Arc;
+use std::fmt::Debug;
 
 use pingora::cache::storage::{HandleHit, HandleMiss, HitHandler, MissHandler};
 use pingora::cache::key::{CacheHashKey, CacheKey, CompactCacheKey, HashBinary};
@@ -28,12 +28,12 @@ use pingora::cache::trace::SpanHandle;
 use pingora::cache::{CacheMeta, PurgeType, Storage};
 use pingora::{Error, Result};
 
-use async_trait::async_trait;
 use scc::HashMap;
-use ahash::RandomState;
-use http::header;
 use serde::{Deserialize, Serialize};
+use ahash::RandomState;
+use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
+use http::header;
 
 /// Content types that skip cache compression by default
 pub const SKIP_COMPRESSION: &'static [&'static str] = &[

@@ -18,12 +18,9 @@
  */
 
 use pingora::cache::eviction::EvictionManager;
-
 use pingora::cache::lock::CacheLock;
 use pingora::cache::predictor::CacheablePredictor;
-
-use pingora::cache::HttpCache;
-use pingora::cache::Storage;
+use pingora::cache::{HttpCache, Storage};
 use pingora::proxy::Session;
 
 /// Caching arguments for `pingora::cache::HttpCache::enable` as one bucket
