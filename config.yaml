@@ -22,19 +22,19 @@
 #upstream_connect_offload_thread_per_pool: 100
 #upstream_debug_ssl_keylog: true
 clusters:
-  - name: one
-    host: "localhost"
-    tls: false
-    discovery:
-      name: "test-service"
-      passing: true
-    prefix: "/one"
-    rate_limit: 200
-    retry: 3
-    timeout: 2000
-    upstream:
-      - "localhost:3000"
-      - "localhost:3001"
+#  - name: one
+#    host: "localhost"
+#    tls: false
+#    discovery:
+#      name: "test-service"
+#      passing: true
+#    prefix: "/one"
+#    rate_limit: 200
+#    retry: 3
+#    timeout: 2000
+#    upstream:
+#      - "localhost:3000"
+#      - "localhost:3001"
   - name: two
     host: "localhost"
     tls: false

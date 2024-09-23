@@ -18,14 +18,13 @@
  */
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::{Error, Result};
 use pingora::http::{ResponseHeader};
-use pingora::cache::{CacheKey, NoCacheReason, RespCacheable};
-use pingora::cache::RespCacheable::Uncacheable;
+use pingora::cache::{CacheKey, CacheMeta, NoCacheReason, RespCacheable};
 use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
 use pingora::cache::lock::CacheLock;
 
@@ -35,7 +34,7 @@ use bytes::Bytes;
 use once_cell::sync::Lazy;
 
 use crate::bucket::CacheBucket;
-use crate::cache::{NoCompression, SccMemoryCache};
+use crate::cache::{MemoryCache};
 use crate::cluster::ClusterMetadata;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
@@ -46,18 +45,13 @@ pub struct ProxyRouter {
     pub prefix_map: HashMap<String, usize>,
 }
 
-const MB: usize = 1024 * 1024;
-
-pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
-    CacheBucket::new(
-        SccMemoryCache::with_capacity(8192)
-            .with_reject_empty_body(true)
-            .with_max_file_size(Some(MB * 8))
-            .with_compression(NoCompression),
-    )
-        .with_eviction(LRUEvictionManager::<16>::with_capacity(MB * 128, 8192))
-        .with_cache_lock(CacheLock::new(Duration::from_millis(1000)))
-});
+// const MB: usize = 1024 * 1024;
+//
+// pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
+//     CacheBucket::new(MemoryCache{})
+//         .with_eviction(LRUEvictionManager::<16>::with_capacity(MB * 128, 8192))
+//         .with_cache_lock(CacheLock::new(Duration::from_millis(1000)))
+// });
 
 // struct for proxy context
 pub struct RouterCtx {
@@ -205,26 +199,37 @@ impl ProxyHttp for ProxyRouter {
         Ok(())
     }
 
-    // // filter if response should be cached
-    // fn request_cache_filter(&self, _session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-    //     Ok(())
-    // }
-    //
-    // // generate the cache key, if the filter says the response should be cache
-    // fn cache_key_callback(&self, session: &Session, _ctx: &mut Self::CTX) -> Result<CacheKey> {
-    //     let req_header = session.req_header();
-    //     Ok(CacheKey::default(req_header))
-    // }
-    //
+    // filter if response should be cached by enable it
+    fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
+        session.cache.enable(&MemoryCache{}, None, None, None);
+        Ok(())
+    }
+
+    // generate the cache key, if the filter says the response should be cache
+    fn cache_key_callback(&self, session: &Session, _ctx: &mut Self::CTX) -> Result<CacheKey> {
+        let req_header = session.req_header();
+        Ok(CacheKey::default(req_header))
+    }
+
     // // decide if the response is cacheable
-    // fn response_cache_filter(
-    //     &self,
-    //     _session: &Session,
-    //     _resp: &ResponseHeader,
-    //     _ctx: &mut Self::CTX,
-    // ) -> Result<RespCacheable> {
-    //     Ok(Uncacheable(NoCacheReason::Custom("default")))
-    // }
+    fn response_cache_filter(
+        &self,
+        _session: &Session,
+        resp: &ResponseHeader,
+        _ctx: &mut Self::CTX,
+    ) -> Result<RespCacheable> {
+        let current_time = SystemTime::now();
+        let fresh_until_time = current_time + Duration::new(10, 0);
+        let meta = CacheMeta::new(fresh_until_time, current_time, 0, 0, resp.clone());
+        Ok(RespCacheable::Cacheable(meta))
+        // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
+        // // Your logic to decide if the response is cacheable
+        // if is_cacheable(resp) {
+        //     Ok(RespCacheable::Cacheable(create_cache_meta(resp)))
+        // } else {
+        //     Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
+        // }
+    }
 
     /**
     * The fail_to_connect is the phase that executes after upstream_peer
