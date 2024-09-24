@@ -19,11 +19,9 @@
 
 use std::any::Any;
 use std::sync::Arc;
-use std::fmt::Debug;
 
 use pingora::cache::storage::{HandleHit, HandleMiss, HitHandler, MissHandler};
 use pingora::cache::key::{CacheHashKey, CacheKey, CompactCacheKey, HashBinary};
-use pingora::cache::max_file_size::ERR_RESPONSE_TOO_LARGE;
 use pingora::cache::trace::SpanHandle;
 use pingora::cache::{CacheMeta, PurgeType, Storage};
 use pingora::{Error, Result};
@@ -33,23 +31,80 @@ use serde::{Deserialize, Serialize};
 use ahash::RandomState;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use http::header;
 
+type BinaryMeta = (Bytes, Bytes);
+
+pub type SharedHashMap = Arc<HashMap<HashBinary, SccCacheObject, RandomState>>;
+
+/// Cache that uses scc::HashMap.
+/// Does not support streaming partial writes
 #[derive(Clone, Debug)]
-pub struct MemoryStorage {}
+pub struct SccMemoryCache {
+    pub cache: SharedHashMap,
+    /// Maximum allowed body size for caching
+    pub max_file_size_bytes: Option<usize>,
+    /// Will reject cache admissions with empty body responses
+    pub reject_empty_body: bool,
+}
+
+impl SccMemoryCache {
+    pub fn from_map(cache: SharedHashMap) -> Self {
+        SccMemoryCache {
+            cache,
+            max_file_size_bytes: None,
+            reject_empty_body: false,
+        }
+    }
+
+    pub fn new() -> Self {
+        SccMemoryCache {
+            cache: Arc::new(HashMap::with_hasher(RandomState::new())),
+            max_file_size_bytes: None,
+            reject_empty_body: false,
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        SccMemoryCache {
+            cache: Arc::new(HashMap::with_capacity_and_hasher(
+                capacity,
+                RandomState::new(),
+            )),
+            max_file_size_bytes: None,
+            reject_empty_body: false,
+        }
+    }
+
+    pub fn with_max_file_size(mut self, max_bytes: Option<usize>) -> Self {
+        self.max_file_size_bytes = max_bytes;
+        self
+    }
+
+    pub fn with_reject_empty_body(mut self, should_error: bool) -> Self {
+        self.reject_empty_body = should_error;
+        self
+    }
+}
 
 #[async_trait]
-impl Storage for MemoryStorage {
+impl Storage for SccMemoryCache {
     async fn lookup(
         &'static self,
         key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
-        println!("lookup occur on Storage impl");
-        let meta = CacheMeta::deserialize("tes".as_ref(), "tes".as_ref())?;
+        let hash = key.combined_bin();
+
+        let cache_object;
+        if let Some(obj) = self.cache.get_async(&hash).await {
+            cache_object = obj.get().clone();
+        } else {
+            return Ok(None);
+        }
+        let meta = CacheMeta::deserialize(&cache_object.meta.0, &cache_object.meta.1)?;
         Ok(Some((
             meta,
-            Box::new(SccHitHandler{}),
+            Box::new(SccHitHandler::new(cache_object, self.clone())),
         )))
     }
 
@@ -59,8 +114,16 @@ impl Storage for MemoryStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<MissHandler> {
-        println!("get miss handler occur on Storage impl");
-        let miss_handler = SccMissHandler {};
+        let hash = key.combined_bin();
+        let raw_meta = meta.serialize()?;
+
+        let meta = (Bytes::from(raw_meta.0), Bytes::from(raw_meta.1));
+        let miss_handler = SccMissHandler {
+            body_buf: BytesMut::new(),
+            meta,
+            key: hash,
+            inner: self.clone(),
+        };
         Ok(Box::new(miss_handler))
     }
 
@@ -70,9 +133,8 @@ impl Storage for MemoryStorage {
         _purge_type: PurgeType,
         _trace: &SpanHandle,
     ) -> Result<bool> {
-        println!("purge occur on Storage impl");
         let hash = key.combined_bin();
-        Ok(true)
+        Ok(self.cache.remove(&hash).is_some())
     }
 
     async fn update_meta(
@@ -81,28 +143,77 @@ impl Storage for MemoryStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<bool> {
-        println!("update meta occur on Storage impl");
-        Ok(true)
+        let hash = key.combined_bin();
+        let new_meta = meta.serialize()?;
+        let new_meta = (Bytes::from(new_meta.0), Bytes::from(new_meta.1));
+
+        let updated = self
+            .cache
+            .update_async(&hash, move |_, value| {
+                value.meta = new_meta;
+            })
+            .await;
+        if let Some(()) = updated {
+            Ok(true)
+        } else {
+            Err(Error::create(
+                pingora::ErrorType::Custom("No meta found for update_meta"),
+                pingora::ErrorSource::Internal,
+                Some(format!("key = {:?}", key).into()),
+                None,
+            ))
+        }
     }
 
     fn support_streaming_partial_write(&self) -> bool {
-        println!("support streaming partial write occur on Storage impl");
         false
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync) {
-        println!("as any occur on Storage impl");
         self
     }
 }
 
-pub struct SccHitHandler {}
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Debug)]
+pub struct SccCacheObject {
+    meta: BinaryMeta,
+    body: Bytes,
+}
+
+pub struct SccHitHandler {
+    cache_object: SccCacheObject,
+    inner: SccMemoryCache,
+    done: bool,
+    range_start: usize,
+    range_end: usize,
+}
+
+impl SccHitHandler {
+    pub(crate) fn new(cache_object: SccCacheObject, inner: SccMemoryCache) -> Self {
+        let len = cache_object.body.len();
+        SccHitHandler {
+            cache_object,
+            inner,
+            done: false,
+            range_start: 0,
+            range_end: len,
+        }
+    }
+}
 
 #[async_trait]
 impl HandleHit for SccHitHandler {
     async fn read_body(&mut self) -> Result<Option<Bytes>> {
-        println!("read body occur on handle hit impl");
-        Ok(None)
+        if self.done {
+            Ok(None)
+        } else {
+            self.done = true;
+            Ok(Some(
+                self.cache_object
+                    .body
+                    .slice(self.range_start..self.range_end),
+            ))
+        }
     }
 
     async fn finish(
@@ -111,38 +222,83 @@ impl HandleHit for SccHitHandler {
         _key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<()> {
-        println!("finish occur on handle hit impl");
         Ok(())
     }
 
     fn can_seek(&self) -> bool {
-        println!("can seek occur on handle hit impl");
         true
     }
 
     fn seek(&mut self, start: usize, end: Option<usize>) -> Result<()> {
-        println!("seek occur on handle hit impl");
+        let len = self.cache_object.body.len();
+        if start >= len {
+            return Error::e_explain(
+                pingora::ErrorType::InternalError,
+                format!("seek start out of range {start} >= {len}"),
+            );
+        }
+        self.range_start = start;
+        if let Some(end) = end {
+            self.range_end = std::cmp::min(len, end);
+        }
+        self.done = false;
         Ok(())
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync) {
-        println!("as any occur on handle hit impl");
         self
     }
 }
 
 #[derive(Debug)]
-struct SccMissHandler {}
+struct SccMissHandler {
+    meta: BinaryMeta,
+    key: HashBinary,
+    body_buf: BytesMut,
+    inner: SccMemoryCache,
+}
 
 #[async_trait]
 impl HandleMiss for SccMissHandler {
     async fn write_body(&mut self, data: bytes::Bytes, _eof: bool) -> Result<()> {
-        println!("write body occur on handle miss impl");
+        if let Some(max_file_size_bytes) = self.inner.max_file_size_bytes {
+            if self.body_buf.len() + data.len() > max_file_size_bytes {
+                return Error::e_explain(
+                    pingora::cache::max_file_size::ERR_RESPONSE_TOO_LARGE,
+                    format!(
+                        "writing data of size {} bytes would exceed max file size of {} bytes",
+                        data.len(),
+                        max_file_size_bytes
+                    ),
+                );
+            }
+        }
+        self.body_buf.extend_from_slice(&data);
         Ok(())
     }
 
     async fn finish(self: Box<Self>) -> Result<usize> {
-        println!("finish occur on handle miss impl");
-        Ok(0)
+        let body_len = self.body_buf.len();
+        if body_len == 0 && self.inner.reject_empty_body {
+            let err = Error::create(
+                pingora::ErrorType::Custom("cache write error: empty body"),
+                pingora::ErrorSource::Internal,
+                None,
+                None,
+            );
+            return Err(err);
+        }
+        let body = self.body_buf.freeze();
+        let size = body.len() + self.meta.0.len() + self.meta.1.len();
+        let cache_object = SccCacheObject {
+            body,
+            meta: self.meta,
+        };
+        self.inner
+            .cache
+            .insert_async(self.key, cache_object)
+            .await
+            .ok();
+        Ok(size)
     }
 }

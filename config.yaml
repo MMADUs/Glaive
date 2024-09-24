@@ -1,7 +1,7 @@
 # gateway configuration
 #version: 2
 #daemon: true
-#error_log: true
+error_log: true
 #pid_file: "path to process id file"
 #upgrade_sock: "path to upgrade socket"
 #user: "user"

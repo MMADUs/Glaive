@@ -34,7 +34,7 @@ use bytes::Bytes;
 use once_cell::sync::Lazy;
 
 use crate::bucket::CacheBucket;
-use crate::cache::{MemoryStorage};
+use crate::cache::{SccMemoryCache};
 use crate::cluster::ClusterMetadata;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
@@ -45,13 +45,19 @@ pub struct ProxyRouter {
     pub prefix_map: HashMap<String, usize>,
 }
 
-// const MB: usize = 1024 * 1024;
-//
-// pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
-//     CacheBucket::new(MemoryCache{})
-//         .with_eviction(LRUEvictionManager::<16>::with_capacity(MB * 128, 8192))
-//         .with_cache_lock(CacheLock::new(Duration::from_millis(1000)))
-// });
+const MB: usize = 1024 * 1024;
+
+pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
+    use pingora::cache::lock::CacheLock;
+
+    CacheBucket::new(
+        SccMemoryCache::with_capacity(8192)
+            .with_reject_empty_body(true)
+            .with_max_file_size(Some(MB * 8))
+    )
+        .with_eviction(LRUEvictionManager::<16>::with_capacity(MB * 128, 8192))
+        .with_cache_lock(CacheLock::new(Duration::from_millis(1000)))
+});
 
 // struct for proxy context
 pub struct RouterCtx {
@@ -201,12 +207,14 @@ impl ProxyHttp for ProxyRouter {
 
     // filter if response should be cached by enable it
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        session.cache.enable(&MemoryStorage{}, None, None, None);
+        println!("enable cache on request cache filter");
+        STATIC_CACHE.enable(session);
         Ok(())
     }
 
     // generate the cache key, if the filter says the response should be cache
     fn cache_key_callback(&self, session: &Session, _ctx: &mut Self::CTX) -> Result<CacheKey> {
+        println!("get cache key callback");
         let req_header = session.req_header();
         Ok(CacheKey::default(req_header))
     }
@@ -218,8 +226,9 @@ impl ProxyHttp for ProxyRouter {
         resp: &ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<RespCacheable> {
+        println!("cache meta on response cache filter");
         let current_time = SystemTime::now();
-        let fresh_until_time = current_time + Duration::new(10, 0);
+        let fresh_until_time = current_time + Duration::new(20, 0);
         let meta = CacheMeta::new(fresh_until_time, current_time, 10, 10, resp.clone());
         Ok(RespCacheable::Cacheable(meta))
         // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
