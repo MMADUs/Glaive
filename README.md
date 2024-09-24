@@ -24,6 +24,6 @@ ArcX in an API Gateway built on top of Pingora. Aims for simplicity, performance
 - [ ] Metrics with Prometheus
 - [ ] Centralized Swagger
 - [ ] SSL Termination
-- [ ] Cache Layer
+- [x] Cache Layer
 - [ ] gRPC Support
 - [ ] Kubernetes ingress compatibility
