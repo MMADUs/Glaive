@@ -36,10 +36,10 @@ use bytes::{Bytes, BytesMut};
 use http::header;
 
 #[derive(Clone, Debug)]
-pub struct MemoryCache {}
+pub struct MemoryStorage {}
 
 #[async_trait]
-impl Storage for MemoryCache {
+impl Storage for MemoryStorage {
     async fn lookup(
         &'static self,
         key: &CacheKey,
@@ -49,8 +49,8 @@ impl Storage for MemoryCache {
         let meta = CacheMeta::deserialize("tes".as_ref(), "tes".as_ref())?;
         Ok(Some((
             meta,
-            Box::new(SccHitHandler{})),
-        ))
+            Box::new(SccHitHandler{}),
+        )))
     }
 
     async fn get_miss_handler(

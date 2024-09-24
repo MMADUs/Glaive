@@ -23,3 +23,4 @@ rs-consul = "0.7.0"
 tokio = { version = "1.40.0", features = ["full"] }
 scc = "2.1.17"
 ahash = "0.8.11"
+bincode = "1.3"

@@ -34,7 +34,7 @@ use bytes::Bytes;
 use once_cell::sync::Lazy;
 
 use crate::bucket::CacheBucket;
-use crate::cache::{MemoryCache};
+use crate::cache::{MemoryStorage};
 use crate::cluster::ClusterMetadata;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
@@ -201,7 +201,7 @@ impl ProxyHttp for ProxyRouter {
 
     // filter if response should be cached by enable it
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        session.cache.enable(&MemoryCache{}, None, None, None);
+        session.cache.enable(&MemoryStorage{}, None, None, None);
         Ok(())
     }
 
@@ -211,7 +211,7 @@ impl ProxyHttp for ProxyRouter {
         Ok(CacheKey::default(req_header))
     }
 
-    // // decide if the response is cacheable
+    // decide if the response is cacheable
     fn response_cache_filter(
         &self,
         _session: &Session,
@@ -220,7 +220,7 @@ impl ProxyHttp for ProxyRouter {
     ) -> Result<RespCacheable> {
         let current_time = SystemTime::now();
         let fresh_until_time = current_time + Duration::new(10, 0);
-        let meta = CacheMeta::new(fresh_until_time, current_time, 0, 0, resp.clone());
+        let meta = CacheMeta::new(fresh_until_time, current_time, 10, 10, resp.clone());
         Ok(RespCacheable::Cacheable(meta))
         // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
         // // Your logic to decide if the response is cacheable
@@ -229,6 +229,26 @@ impl ProxyHttp for ProxyRouter {
         // } else {
         //     Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
         // }
+    }
+
+    // triggered when cache hits
+    async fn cache_hit_filter(
+        &self,
+        _session: &Session,
+        _meta: &CacheMeta,
+        _ctx: &mut Self::CTX,
+    ) -> Result<bool>
+    where
+        Self::CTX: Send + Sync,
+    {
+        println!("cache hit filter occurred");
+        Ok(false)
+    }
+
+    // triggered when cache misses
+    fn cache_miss(&self, session: &mut Session, _ctx: &mut Self::CTX) {
+        println!("cache miss occurred");
+        session.cache.cache_miss();
     }
 
     /**
