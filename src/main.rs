@@ -38,6 +38,9 @@ use crate::config::load_config;
 use crate::proxy::ProxyRouter;
 
 fn main() {
+    // logging init
+    tracing_subscriber::fmt::init();
+
     // Setup a server
     let opt = Opt::parse_args();
     let mut arc_server = Server::new(Some(opt)).unwrap();

@@ -32,6 +32,7 @@ use serde::Serialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use once_cell::sync::Lazy;
+use tracing::{info, error};
 
 use crate::bucket::CacheBucket;
 use crate::cache::{SccMemoryCache};
@@ -48,8 +49,6 @@ pub struct ProxyRouter {
 const MB: usize = 1024 * 1024;
 
 pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
-    use pingora::cache::lock::CacheLock;
-
     CacheBucket::new(
         SccMemoryCache::with_capacity(8192)
             .with_reject_empty_body(true)
@@ -99,16 +98,12 @@ impl ProxyHttp for ProxyRouter {
 
         // Set up the upstream
         let upstream = cluster.upstream.select(b"", 256).unwrap(); // Hash doesn't matter for round_robin
-        println!("upstream peer is: {:?}", upstream);
-        println!("upstream tls: {:?}", cluster.tls);
-
         // Set SNI to the cluster's host
         let mut peer = Box::new(HttpPeer::new(upstream, cluster.tls, cluster.host.clone()));
-
         // given the proxy timeout
         let timeout = cluster.timeout.unwrap_or(100);
         peer.options.connection_timeout = Some(Duration::from_millis(timeout));
-        println!("send request to upstream");
+        info!("sending request on upstream peer");
         Ok(peer)
     }
 
@@ -124,10 +119,10 @@ impl ProxyHttp for ProxyRouter {
     where
         Self::CTX: Send + Sync,
     {
+        info!("request filter");
         // Clone the original request header and get the URI path
         let cloned_req_header = session.req_header().clone();
         let original_uri = cloned_req_header.uri.path();
-        println!("original uri: {}", original_uri);
 
         // result to consider if request should continue or stop
         let mut result: bool;
@@ -137,9 +132,6 @@ impl ProxyHttp for ProxyRouter {
 
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
-
-        println!("uri before send to upstream: {}", session.req_header().uri.path());
-        println!("The value of my_bool is: {}", result);
 
         // currently to handle default proxy when cluster does not exist on config
         result = match cluster.host.starts_with("//default//") {
@@ -199,6 +191,7 @@ impl ProxyHttp for ProxyRouter {
     where
         Self::CTX: Send + Sync,
     {
+        info!("response filter");
         // Remove content-length because the size of the new body is unknown
         upstream_response.remove_header("Content-Length");
         upstream_response.insert_header("Transfer-Encoding", "Chunked")?;
@@ -207,14 +200,14 @@ impl ProxyHttp for ProxyRouter {
 
     // filter if response should be cached by enable it
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        println!("enable cache on request cache filter");
+        info!("enabling cache on request_cache_filter");
         STATIC_CACHE.enable(session);
         Ok(())
     }
 
     // generate the cache key, if the filter says the response should be cache
     fn cache_key_callback(&self, session: &Session, _ctx: &mut Self::CTX) -> Result<CacheKey> {
-        println!("get cache key callback");
+        info!("generate cache key on callback");
         let req_header = session.req_header();
         Ok(CacheKey::default(req_header))
     }
@@ -226,9 +219,9 @@ impl ProxyHttp for ProxyRouter {
         resp: &ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<RespCacheable> {
-        println!("cache meta on response cache filter");
+        info!("cache response on response cache filter");
         let current_time = SystemTime::now();
-        let fresh_until_time = current_time + Duration::new(20, 0);
+        let fresh_until_time = current_time + Duration::new(2, 0);
         let meta = CacheMeta::new(fresh_until_time, current_time, 10, 10, resp.clone());
         Ok(RespCacheable::Cacheable(meta))
         // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
@@ -250,13 +243,13 @@ impl ProxyHttp for ProxyRouter {
     where
         Self::CTX: Send + Sync,
     {
-        println!("cache hit filter occurred");
+        info!("cache hit from cache_hit_filter");
         Ok(false)
     }
 
     // triggered when cache misses
     fn cache_miss(&self, session: &mut Session, _ctx: &mut Self::CTX) {
-        println!("cache miss occurred");
+        info!("cache miss from cache_miss");
         session.cache.cache_miss();
     }
 

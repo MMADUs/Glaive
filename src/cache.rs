@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use ahash::RandomState;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
+use tracing::{info, error};
 
 type BinaryMeta = (Bytes, Bytes);
 
@@ -93,6 +94,7 @@ impl Storage for SccMemoryCache {
         key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
+        info!("cache lookup");
         let hash = key.combined_bin();
 
         let cache_object;
@@ -114,6 +116,7 @@ impl Storage for SccMemoryCache {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<MissHandler> {
+        info!("get miss handler");
         let hash = key.combined_bin();
         let raw_meta = meta.serialize()?;
 
@@ -133,6 +136,7 @@ impl Storage for SccMemoryCache {
         _purge_type: PurgeType,
         _trace: &SpanHandle,
     ) -> Result<bool> {
+        info!("purge and remove cache");
         let hash = key.combined_bin();
         Ok(self.cache.remove(&hash).is_some())
     }
@@ -143,6 +147,7 @@ impl Storage for SccMemoryCache {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<bool> {
+        info!("update cache");
         let hash = key.combined_bin();
         let new_meta = meta.serialize()?;
         let new_meta = (Bytes::from(new_meta.0), Bytes::from(new_meta.1));
@@ -166,10 +171,12 @@ impl Storage for SccMemoryCache {
     }
 
     fn support_streaming_partial_write(&self) -> bool {
+        info!("partial writes");
         false
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync) {
+        info!("as any storage impl");
         self
     }
 }
@@ -204,6 +211,7 @@ impl SccHitHandler {
 #[async_trait]
 impl HandleHit for SccHitHandler {
     async fn read_body(&mut self) -> Result<Option<Bytes>> {
+        info!("read body after cache hit");
         if self.done {
             Ok(None)
         } else {
@@ -222,14 +230,17 @@ impl HandleHit for SccHitHandler {
         _key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<()> {
+        info!("finish cache hit");
         Ok(())
     }
 
     fn can_seek(&self) -> bool {
+        info!("can seek cache hit");
         true
     }
 
     fn seek(&mut self, start: usize, end: Option<usize>) -> Result<()> {
+        info!("seek cache hit");
         let len = self.cache_object.body.len();
         if start >= len {
             return Error::e_explain(
@@ -246,6 +257,7 @@ impl HandleHit for SccHitHandler {
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync) {
+        info!("as any cache hit");
         self
     }
 }
@@ -261,6 +273,7 @@ struct SccMissHandler {
 #[async_trait]
 impl HandleMiss for SccMissHandler {
     async fn write_body(&mut self, data: bytes::Bytes, _eof: bool) -> Result<()> {
+        info!("write body after cache miss");
         if let Some(max_file_size_bytes) = self.inner.max_file_size_bytes {
             if self.body_buf.len() + data.len() > max_file_size_bytes {
                 return Error::e_explain(
@@ -278,6 +291,7 @@ impl HandleMiss for SccMissHandler {
     }
 
     async fn finish(self: Box<Self>) -> Result<usize> {
+        info!("finishing cache miss");
         let body_len = self.body_buf.len();
         if body_len == 0 && self.inner.reject_empty_body {
             let err = Error::create(
