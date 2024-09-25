@@ -124,17 +124,21 @@ impl ProxyHttp for ProxyRouter {
         let cloned_req_header = session.req_header().clone();
         let original_uri = cloned_req_header.uri.path();
 
-        // result to consider if request should continue or stop
-        let mut result: bool;
-
+        println!("select path");
         // select the cluster based on prefix
-        result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+        let path_result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+        match path_result {
+            true => return Ok(true),
+            false => (),
+        }
 
+        println!("select cluster");
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
 
+        println!("handle default");
         // currently to handle default proxy when cluster does not exist on config
-        result = match cluster.host.starts_with("//default//") {
+        let default_handler_result = match cluster.host.starts_with("//default//") {
             true => {
                 // response with 200 and body
                 let mut header = ResponseHeader::build(200, None)?;
@@ -152,18 +156,24 @@ impl ProxyHttp for ProxyRouter {
                 session.write_response_body(body_bytes, true).await?;
                 true
             }
-            false => { false }
+            false => false,
         };
+        match default_handler_result {
+            true => return Ok(true),
+            false => (),
+        }
 
+        println!("check rate limit");
         // validate if rate limit exist from config
         match cluster.rate_limit {
             Some(limit) => {
                 // rate limit incoming request
-                result = rate_limiter(limit, session, ctx).await;
+                println!("rate limiting");
+                let exceed = rate_limiter(limit, session, ctx).await;
+                Ok(exceed)
             },
-            None => {}
+            None => Ok(false),
         }
-        Ok(result)
     }
 
     /**
@@ -200,8 +210,8 @@ impl ProxyHttp for ProxyRouter {
 
     // filter if response should be cached by enable it
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        info!("enabling cache on request_cache_filter");
-        STATIC_CACHE.enable(session);
+        info!("disable cache on request_cache_filter");
+        // STATIC_CACHE.enable(session);
         Ok(())
     }
 
@@ -221,7 +231,8 @@ impl ProxyHttp for ProxyRouter {
     ) -> Result<RespCacheable> {
         info!("cache response on response cache filter");
         let current_time = SystemTime::now();
-        let fresh_until_time = current_time + Duration::new(2, 0);
+        let fresh_until_time = current_time + Duration::new(10, 0);
+        println!("cache created on {:?} and fresh until {:?}", current_time, fresh_until_time);
         let meta = CacheMeta::new(fresh_until_time, current_time, 10, 10, resp.clone());
         Ok(RespCacheable::Cacheable(meta))
         // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))

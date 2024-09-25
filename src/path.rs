@@ -42,6 +42,9 @@ pub async fn select_cluster(
             idx
         });
 
+    println!("original uri: {}", original_uri);
+    println!("modified uri: {}", modified_uri);
+
     // check if cluster address exist
     match cluster_idx_option {
         Some(idx) => {
@@ -65,6 +68,7 @@ pub async fn select_cluster(
         return false
     }
 
+    println!("uri is not empty");
     // parse the modified uri to a valid http uri
     match modified_uri.parse::<http::Uri>() {
         Ok(new_uri) => {
