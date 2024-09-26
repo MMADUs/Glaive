@@ -24,7 +24,7 @@ use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::{Error, Result};
 use pingora::http::{ResponseHeader};
-use pingora::cache::{CacheKey, CacheMeta, NoCacheReason, RespCacheable};
+use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
 use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
 use pingora::cache::lock::CacheLock;
 
@@ -32,10 +32,9 @@ use serde::Serialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use once_cell::sync::Lazy;
-use tracing::{info, error};
 
 use crate::bucket::CacheBucket;
-use crate::cache::{SccMemoryCache};
+use crate::cache::MemoryStorage;
 use crate::cluster::ClusterMetadata;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
@@ -50,7 +49,7 @@ const MB: usize = 1024 * 1024;
 
 pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
     CacheBucket::new(
-        SccMemoryCache::with_capacity(8192)
+        MemoryStorage::with_capacity(8192)
             .with_reject_empty_body(true)
             .with_max_file_size(Some(MB * 8))
     )
@@ -62,6 +61,7 @@ pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
 pub struct RouterCtx {
     pub cluster_address: usize,
     pub proxy_retry: usize,
+    pub uri_origin: Option<String>,
 }
 
 // the struct for default proxy response
@@ -82,12 +82,11 @@ impl ProxyHttp for ProxyRouter {
     fn new_ctx(&self) -> Self::CTX { RouterCtx {
         cluster_address: 0,
         proxy_retry: 0,
+        uri_origin: None,
     }}
 
-    /**
-    * The upstream_peer is the third phase that executes in the lifecycle
-    * if this lifecycle returns the http peer
-    */
+    // The upstream_peer phase executes after request_filter
+    // this lifecycle returns the http peer
     async fn upstream_peer(
         &self,
         _session: &mut Session,
@@ -103,14 +102,12 @@ impl ProxyHttp for ProxyRouter {
         // given the proxy timeout
         let timeout = cluster.timeout.unwrap_or(100);
         peer.options.connection_timeout = Some(Duration::from_millis(timeout));
-        info!("sending request on upstream peer");
         Ok(peer)
     }
 
-    /**
-    * The request_filter is the first phase that executes in the lifecycle
-    * if this lifecycle returns true = the proxy stops | false = continue to upper lifecycle
-    */
+
+    // The request_filter is the first phase that executes in the lifecycle
+    // if this lifecycle returns true = the proxy stops | false = continue to upper lifecycle
     async fn request_filter(
         &self,
         session: &mut Session,
@@ -119,12 +116,12 @@ impl ProxyHttp for ProxyRouter {
     where
         Self::CTX: Send + Sync,
     {
-        info!("request filter");
         // Clone the original request header and get the URI path
         let cloned_req_header = session.req_header().clone();
         let original_uri = cloned_req_header.uri.path();
+        // set uri origin to ctx for cache key later
+        ctx.uri_origin = Some(cloned_req_header.uri.to_string());
 
-        println!("select path");
         // select the cluster based on prefix
         let path_result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
         match path_result {
@@ -132,11 +129,9 @@ impl ProxyHttp for ProxyRouter {
             false => (),
         }
 
-        println!("select cluster");
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
 
-        println!("handle default");
         // currently to handle default proxy when cluster does not exist on config
         let default_handler_result = match cluster.host.starts_with("//default//") {
             true => {
@@ -163,63 +158,41 @@ impl ProxyHttp for ProxyRouter {
             false => (),
         }
 
-        println!("check rate limit");
         // validate if rate limit exist from config
         match cluster.rate_limit {
             Some(limit) => {
                 // rate limit incoming request
-                println!("rate limiting");
-                let exceed = rate_limiter(limit, session, ctx).await;
-                Ok(exceed)
+                let limiter_result = rate_limiter(limit, session, ctx).await;
+                match limiter_result {
+                    true => return Ok(true),
+                    false => (),
+                }
             },
-            None => Ok(false),
+            None => (),
         }
+        // continue the request
+        Ok(false)
     }
 
-    /**
-    * The proxy_upstream_filter is the second phase that executes in the lifecycle
-    * if this lifecycle returns false = the proxy stops | true = continue to upper lifecycle
-    */
-    async fn proxy_upstream_filter(
-        &self,
-        _session: &mut Session,
-        _ctx: &mut Self::CTX
-    ) -> Result<bool>
-    where
-        Self::CTX: Send + Sync,
-    {
-        Ok(true)
-    }
-
-    // 5. fifth phase executed
-    async fn response_filter(
-        &self,
-        _session: &mut Session,
-        upstream_response: &mut ResponseHeader,
-        _ctx: &mut Self::CTX,
-    ) -> Result<()>
-    where
-        Self::CTX: Send + Sync,
-    {
-        info!("response filter");
-        // Remove content-length because the size of the new body is unknown
-        upstream_response.remove_header("Content-Length");
-        upstream_response.insert_header("Transfer-Encoding", "Chunked")?;
-        Ok(())
-    }
-
-    // filter if response should be cached by enable it
+    // filter if response should be cached by enabling it
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        info!("disable cache on request_cache_filter");
-        // STATIC_CACHE.enable(session);
+        // TODO: make a GET method filter to cache response
+        // enable cache to proceed the response to be cached
+        STATIC_CACHE.enable(session);
         Ok(())
     }
 
     // generate the cache key, if the filter says the response should be cache
-    fn cache_key_callback(&self, session: &Session, _ctx: &mut Self::CTX) -> Result<CacheKey> {
-        info!("generate cache key on callback");
-        let req_header = session.req_header();
-        Ok(CacheKey::default(req_header))
+    fn cache_key_callback(&self, session: &Session, ctx: &mut Self::CTX) -> Result<CacheKey> {
+        // generate key based on the uri method
+        // this makes the cache meta unique and prevent cache conflict among other routes
+        let key = match ctx.uri_origin.clone() {
+            // TODO: make the cache key more unique proper
+            // currently just an origin as temp key
+            Some(origin) => CacheKey::new(&origin, &origin, ""),
+            None => CacheKey::default(session.req_header())
+        };
+        Ok(key)
     }
 
     // decide if the response is cacheable
@@ -229,45 +202,54 @@ impl ProxyHttp for ProxyRouter {
         resp: &ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<RespCacheable> {
-        info!("cache response on response cache filter");
         let current_time = SystemTime::now();
-        let fresh_until_time = current_time + Duration::new(10, 0);
-        println!("cache created on {:?} and fresh until {:?}", current_time, fresh_until_time);
-        let meta = CacheMeta::new(fresh_until_time, current_time, 10, 10, resp.clone());
+        // set cache expiry to 10 seconds
+        // TODO: make the expiry config soon
+        let fresh_until = current_time + Duration::new(10, 0);
+        let meta = CacheMeta::new(fresh_until, current_time, 0, 0, resp.clone());
         Ok(RespCacheable::Cacheable(meta))
+        // response for no cache
         // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
-        // // Your logic to decide if the response is cacheable
-        // if is_cacheable(resp) {
-        //     Ok(RespCacheable::Cacheable(create_cache_meta(resp)))
-        // } else {
-        //     Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
-        // }
     }
 
-    // triggered when cache hits
-    async fn cache_hit_filter(
+    // the response filter is responsible for modifying response
+    async fn response_filter(
         &self,
-        _session: &Session,
-        _meta: &CacheMeta,
+        session: &mut Session,
+        upstream_response: &mut ResponseHeader,
         _ctx: &mut Self::CTX,
-    ) -> Result<bool>
+    ) -> Result<()>
     where
         Self::CTX: Send + Sync,
     {
-        info!("cache hit from cache_hit_filter");
-        Ok(false)
+        // default server identity in headers
+        upstream_response.insert_header("Server", "ArcX Gateway")?;
+
+        // insert header for cache status
+        if session.cache.enabled() {
+            match session.cache.phase() {
+                CachePhase::Hit => upstream_response.insert_header("x-cache-status", "hit")?,
+                CachePhase::Miss => upstream_response.insert_header("x-cache-status", "miss")?,
+                CachePhase::Stale => upstream_response.insert_header("x-cache-status", "stale")?,
+                CachePhase::Expired => upstream_response.insert_header("x-cache-status", "expired")?,
+                CachePhase::Revalidated | CachePhase::RevalidatedNoCache(_) => upstream_response.insert_header("x-cache-status", "revalidated")?,
+                _ => upstream_response.insert_header("x-cache-status", "invalid")?,
+            }
+        } else {
+            match session.cache.phase() {
+                CachePhase::Disabled(NoCacheReason::Deferred) => upstream_response.insert_header("x-cache-status", "deferred")?,
+                _ => upstream_response.insert_header("x-cache-status", "no-cache")?,
+            }
+        }
+        // cache duration
+        if let Some(d) = session.cache.lock_duration() {
+            upstream_response.insert_header("x-cache-lock-time-ms", format!("{}", d.as_millis()))?
+        }
+        Ok(())
     }
 
-    // triggered when cache misses
-    fn cache_miss(&self, session: &mut Session, _ctx: &mut Self::CTX) {
-        info!("cache miss from cache_miss");
-        session.cache.cache_miss();
-    }
-
-    /**
-    * The fail_to_connect is the phase that executes after upstream_peer
-    * in this lifecycle it checks if request can be retryable or error
-    */
+    // The fail_to_connect phase executes when upstream_peer is unable to connect
+    // in this lifecycle it checks if request can be retryable or error
     fn fail_to_connect(
         &self,
         _session: &mut Session,

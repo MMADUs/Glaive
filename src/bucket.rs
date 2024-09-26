@@ -23,7 +23,7 @@ use pingora::cache::predictor::CacheablePredictor;
 use pingora::cache::{HttpCache, Storage};
 use pingora::proxy::Session;
 
-/// Caching arguments for `pingora::cache::HttpCache::enable` as one bucket
+// the caching bucket is used for configuring all the cache storage
 #[derive(Clone, Copy)]
 pub struct CacheBucket {
     pub storage: &'static (dyn Storage + Sync),
@@ -33,6 +33,7 @@ pub struct CacheBucket {
 }
 
 impl CacheBucket {
+    // new instances
     pub fn new<T>(storage: T) -> Self
     where
         T: Storage + Sync + 'static,
@@ -44,47 +45,47 @@ impl CacheBucket {
             cache_lock: None,
         }
     }
-
+    // provide eviction manager
     pub fn with_eviction<T: EvictionManager + Sync + 'static>(mut self, eviction: T) -> Self {
         let b = Box::new(eviction);
         self.eviction = Some(Box::leak(b));
         self
     }
-
+    // without eviction
     pub fn without_eviction(&self) -> Self {
         let mut this = self.clone();
         this.eviction = None;
         this
     }
-
+    // provide predictor
     pub fn with_predictor<T: CacheablePredictor + Sync + 'static>(mut self, predictor: T) -> Self {
         let b = Box::new(predictor);
         self.predictor = Some(Box::leak(b));
         self
     }
-
+    // without predictor
     pub fn without_predictor(&self) -> Self {
         let mut this = self.clone();
         this.predictor = None;
         this
     }
-
+    // provide cache lock
     pub fn with_cache_lock(mut self, cache_lock: CacheLock) -> Self {
         let b = Box::new(cache_lock);
         self.cache_lock = Some(Box::leak(b));
         self
     }
-
+    // without cache lock
     pub fn without_cache_lock(&self) -> Self {
         let mut this = self.clone();
         this.cache_lock = None;
         this
     }
-
-    pub fn enable_cache(&self, cache: &mut HttpCache) {
+    // private method used to enable cache
+    fn enable_cache(&self, cache: &mut HttpCache) {
         cache.enable(self.storage, self.eviction, self.predictor, self.cache_lock)
     }
-
+    // the method that is used to enable cache
     pub fn enable(&self, session: &mut Session) {
         self.enable_cache(&mut session.cache)
     }
