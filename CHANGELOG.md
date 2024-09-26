@@ -9,5 +9,6 @@ the change log will be improved once the project hit the stable version.
 
 ## Version 1.0.0 - 5-09-2024
 
+- Yaml Configuration
 - Realtime Upstream Healthcheck
 - Basic Proxy trait Impl
