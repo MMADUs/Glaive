@@ -39,7 +39,13 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/two"
-    rate_limit: 200
+    rate_limit: 5
+    cache:
+      memory:
+        cache_ttl: 10
+        max_size: 5
+        max_cache: 10
+        lock_timeout: 1000
     retry: 3
     timeout: 2000
     upstream:

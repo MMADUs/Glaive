@@ -175,10 +175,15 @@ impl ProxyHttp for ProxyRouter {
     }
 
     // filter if response should be cached by enabling it
-    fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        // TODO: make a GET method filter to cache response
-        // enable cache to proceed the response to be cached
-        STATIC_CACHE.enable(session);
+    fn request_cache_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<()> {
+        // select the cluster based on the selected index
+        let cluster = &self.clusters[ctx.cluster_address];
+        // get request method
+        let method = session.req_header().method.clone();
+        // filter if request method is GET and Storage exist
+        if method == "GET" && cluster.cache_storage.is_some() {
+            STATIC_CACHE.enable(session);
+        }
         Ok(())
     }
 

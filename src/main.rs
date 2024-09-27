@@ -74,6 +74,7 @@ fn main() {
                 host: "//default//".to_string(),
                 tls: false,
                 rate_limit: None,
+                cache_storage: None,
                 retry: None,
                 timeout: None,
                 upstream: default.task(),

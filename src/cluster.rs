@@ -20,13 +20,15 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-
+use pingora::cache::lock::CacheLock;
 use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
+use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
 
-use serde::Deserialize;
-
+use serde::{Deserialize, Serialize};
+use crate::bucket::CacheBucket;
+use crate::cache::MemoryStorage;
 use crate::proxy::ProxyRouter;
 use crate::discovery::{Discovery, DiscoveryBackgroundService};
 
@@ -47,6 +49,8 @@ pub struct ClusterConfig {
     discovery: Option<DiscoveryConfig>,
     // the rate limit responsible for the maximum request to be limited
     rate_limit: Option<isize>,
+    // the used cache type
+    cache: Option<CacheType>,
     // the retry and timout mechanism is provided for connection failures
     retry: Option<usize>,
     timeout: Option<u64>,
@@ -63,6 +67,29 @@ pub struct DiscoveryConfig {
     // the passing option determines if the discovery should return healthy/alive services
     // the default is false. set passing to true if you want to get healthy services.
     passing: Option<bool>,
+}
+
+// Struct for memory cache configuration
+#[derive(Debug, Deserialize, Serialize)]
+struct MemoryCache {
+    cache_ttl: usize,
+    max_size: usize,
+    max_cache: usize,
+    lock_timeout: usize,
+}
+
+// Struct for redis cache configuration
+#[derive(Debug, Deserialize, Serialize)]
+struct RedisCache {
+    cache_ttl: usize,
+}
+
+// enum cache type
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CacheType {
+    Memory { memory: MemoryCache },
+    Redis { redis: RedisCache },
 }
 
 // build the cluster with hardcoded upstream
@@ -127,6 +154,7 @@ pub struct ClusterMetadata {
     pub host: String,
     pub tls: bool,
     pub rate_limit: Option<isize>,
+    pub cache_storage: Option<CacheBucket>,
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
@@ -190,12 +218,40 @@ pub fn build_cluster(
             cluster
         };
 
+        // check if cluster is using cache
+        let cluster_cache_storage_opt = match cluster_conf.cache {
+            // if cache config found, check the storage strategy
+            Some(cache_type) => {
+                // check the storage strategy
+                let storage = match cache_type {
+                    // if cache uses memory
+                    CacheType::Memory { memory } => {
+                        let mega_byte: usize = 1024 * 1024;
+                        let bucket = CacheBucket::new(
+                            MemoryStorage::with_capacity(8192)
+                                .with_reject_empty_body(true)
+                                .with_max_file_size(Some(mega_byte * memory.max_size)),
+                        )
+                            .with_eviction(LRUEvictionManager::<16>::with_capacity(mega_byte * memory.max_cache, 8192))
+                            .with_cache_lock(CacheLock::new(Duration::from_millis(1000)));
+                        // return bucket
+                        Some(bucket)
+                    }
+                    // if cache using redis
+                    CacheType::Redis { redis } => None
+                };
+                storage
+            },
+            None => None
+        };
+
         // Build the cluster metadata and add it to the cluster list
         clusters.push( ClusterMetadata {
             name: cluster_conf.name.unwrap(),
             host: cluster_conf.host.unwrap(),
             tls: cluster_conf.tls.unwrap(),
             rate_limit: cluster_conf.rate_limit,
+            cache_storage: cluster_cache_storage_opt,
             retry: cluster_conf.retry,
             timeout: cluster_conf.timeout,
             upstream: cluster_service.task(),
