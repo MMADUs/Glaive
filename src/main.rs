@@ -26,16 +26,15 @@ mod auth;
 mod discovery;
 mod cache;
 mod bucket;
-
-use std::collections::HashMap;
+mod default;
 
 use pingora::prelude::Opt;
 use pingora::proxy::http_proxy_service;
 use pingora::server::Server;
 
-use crate::cluster::{build_cluster, build_cluster_service, ClusterMetadata};
+use crate::cluster::build_cluster;
 use crate::config::load_config;
-use crate::proxy::ProxyRouter;
+use crate::default::DefaultProxy;
 
 fn main() {
     // logging init
@@ -49,7 +48,7 @@ fn main() {
     server.bootstrap(); // preparing
 
     // checks the cluster configuration existence and build the cluster
-    let proxy_router = match cluster_configuration {
+    match cluster_configuration {
         Some(cluster_config) => {
             // build the entire cluster from the configuration
             // the built cluster will return the main proxy router and the necessary background processing
@@ -62,39 +61,18 @@ fn main() {
             for (_idx, updater_process) in updaters.into_iter().enumerate() {
                 server.add_service(updater_process);
             }
-            proxy_router
+            // build the proxy service and listen
+            let mut router = http_proxy_service(&server.configuration, proxy_router);
+            router.add_tcp("0.0.0.0:6188");
+            server.add_service(router);
         },
         None => {
-            // the default metadata if none of cluster exist.
-            let mut default_cluster: Vec<ClusterMetadata> = Vec::new();
-            let mut default_prefix = HashMap::new();
-            let default = build_cluster_service(&["0:0"]);
-            let metadata = ClusterMetadata{
-                name: "Glaive Gateway".to_string(),
-                host: "//default//".to_string(),
-                tls: false,
-                rate_limit: None,
-                cache_storage: None,
-                cache_ttl: None,
-                retry: None,
-                timeout: None,
-                upstream: default.task(),
-            };
-            default_cluster.push(metadata);
-            default_prefix.insert("/".to_string(), 0);
-            let router = ProxyRouter{
-                clusters: default_cluster,
-                prefix_map: default_prefix,
-            };
-            router
+            // this is the default proxy trait that runs when configuration does not exist
+            let mut default = http_proxy_service(&server.configuration, DefaultProxy{});
+            default.add_tcp("0.0.0.0:6188");
+            server.add_service(default);
         }
     };
-
-    // Build the proxy with the prepared configuration and the main proxy router
-    let mut router_service = http_proxy_service(&server.configuration, proxy_router);
-    // Proxy server port to listen
-    router_service.add_tcp("0.0.0.0:6188");
-    // Set the main proxy as background process and run forever.
-    server.add_service(router_service);
+    // run the server forever.
     server.run_forever();
 }

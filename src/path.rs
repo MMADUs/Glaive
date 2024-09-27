@@ -42,14 +42,10 @@ pub async fn select_cluster(
             idx
         });
 
-    println!("original uri: {}", original_uri);
-    println!("modified uri: {}", modified_uri);
-
     // check if cluster address exist
     match cluster_idx_option {
         Some(idx) => {
             // if exist modify cluster address to the selected address
-            println!("Cluster idx: {}", idx);
             ctx.cluster_address = idx;
         }
         None => {
@@ -62,17 +58,14 @@ pub async fn select_cluster(
 
     // checks for empty modified uri
     if modified_uri.is_empty() {
-        println!("uri is empty.");
         // if modified uri is empty then just redirect to "/"
         session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
         return false
     }
 
-    println!("uri is not empty");
     // parse the modified uri to a valid http uri
     match modified_uri.parse::<http::Uri>() {
         Ok(new_uri) => {
-            println!("New URI: {}", new_uri);
             session.req_header_mut().set_uri(new_uri);
             false
         }

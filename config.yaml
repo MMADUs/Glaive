@@ -42,7 +42,7 @@ clusters:
     rate_limit: 100
     cache:
       memory:
-        cache_ttl: 2
+        cache_ttl: 10
         max_size: 5
         max_cache: 10
         lock_timeout: 1000

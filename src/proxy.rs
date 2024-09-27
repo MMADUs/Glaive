@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime};
 
 use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
-use pingora::{Error, Result};
+use pingora::{Error, Result as PingoraResult};
 use pingora::http::{ResponseHeader};
 use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
 use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
@@ -30,7 +30,6 @@ use pingora::cache::lock::CacheLock;
 
 use serde::Serialize;
 use async_trait::async_trait;
-use bytes::Bytes;
 use once_cell::sync::Lazy;
 
 use crate::bucket::CacheBucket;
@@ -91,7 +90,7 @@ impl ProxyHttp for ProxyRouter {
         &self,
         _session: &mut Session,
         ctx: &mut Self::CTX,
-    ) -> Result<Box<HttpPeer>> {
+    ) -> PingoraResult<Box<HttpPeer>> {
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
 
@@ -112,7 +111,7 @@ impl ProxyHttp for ProxyRouter {
         &self,
         session: &mut Session,
         ctx: &mut Self::CTX
-    ) -> Result<bool>
+    ) -> PingoraResult<bool>
     where
         Self::CTX: Send + Sync,
     {
@@ -128,35 +127,8 @@ impl ProxyHttp for ProxyRouter {
             true => return Ok(true),
             false => (),
         }
-
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
-
-        // currently to handle default proxy when cluster does not exist on config
-        let default_handler_result = match cluster.host.starts_with("//default//") {
-            true => {
-                // response with 200 and body
-                let mut header = ResponseHeader::build(200, None)?;
-                header.insert_header("Content-Type", "application/json")?;
-                let body = Default{
-                    server: "Glaive Gateway".to_string(),
-                    version: "2.0.0 Release".to_string(),
-                    message: "start configuring your gateway!".to_string(),
-                    github: "https://github.com/MMADUs/Glaive".to_string(),
-                };
-                let json_body = serde_json::to_string(&body).unwrap();
-                let body_bytes = Some(Bytes::from(json_body));
-                session.set_keepalive(None);
-                session.write_response_header(Box::new(header), true).await?;
-                session.write_response_body(body_bytes, true).await?;
-                true
-            }
-            false => false,
-        };
-        match default_handler_result {
-            true => return Ok(true),
-            false => (),
-        }
 
         // validate if rate limit exist from config
         match cluster.rate_limit {
@@ -175,7 +147,7 @@ impl ProxyHttp for ProxyRouter {
     }
 
     // filter if response should be cached by enabling it
-    fn request_cache_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<()> {
+    fn request_cache_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> PingoraResult<()> {
         // select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
         // get request method
@@ -188,7 +160,7 @@ impl ProxyHttp for ProxyRouter {
     }
 
     // generate the cache key, if the filter says the response should be cache
-    fn cache_key_callback(&self, session: &Session, ctx: &mut Self::CTX) -> Result<CacheKey> {
+    fn cache_key_callback(&self, session: &Session, ctx: &mut Self::CTX) -> PingoraResult<CacheKey> {
         // generate key based on the uri method
         // this makes the cache meta unique and prevent cache conflict among other routes
         let key = match ctx.uri_origin.clone() {
@@ -206,7 +178,7 @@ impl ProxyHttp for ProxyRouter {
         _session: &Session,
         resp: &ResponseHeader,
         ctx: &mut Self::CTX,
-    ) -> Result<RespCacheable> {
+    ) -> PingoraResult<RespCacheable> {
         // select the cluster to get the ttl
         let cluster = &self.clusters[ctx.cluster_address];
         let ttl = cluster.cache_ttl.unwrap() as u64;
@@ -225,7 +197,7 @@ impl ProxyHttp for ProxyRouter {
         session: &mut Session,
         upstream_response: &mut ResponseHeader,
         _ctx: &mut Self::CTX,
-    ) -> Result<()>
+    ) -> PingoraResult<()>
     where
         Self::CTX: Send + Sync,
     {
