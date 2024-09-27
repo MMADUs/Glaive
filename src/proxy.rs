@@ -1,7 +1,7 @@
 /**
- * Copyright (c) 2024-2025 ArcX, Inc.
+ * Copyright (c) 2024-2025 Glaive, Inc.
  *
- * This file is part of ArcX Gateway
+ * This file is part of Glaive Gateway
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -139,10 +139,10 @@ impl ProxyHttp for ProxyRouter {
                 let mut header = ResponseHeader::build(200, None)?;
                 header.insert_header("Content-Type", "application/json")?;
                 let body = Default{
-                    server: "ArcX API Gateway".to_string(),
+                    server: "Glaive Gateway".to_string(),
                     version: "2.0.0 Release".to_string(),
                     message: "start configuring your gateway!".to_string(),
-                    github: "https://github.com/MMADUs/ArcX".to_string(),
+                    github: "https://github.com/MMADUs/Glaive".to_string(),
                 };
                 let json_body = serde_json::to_string(&body).unwrap();
                 let body_bytes = Some(Bytes::from(json_body));
@@ -223,7 +223,7 @@ impl ProxyHttp for ProxyRouter {
         Self::CTX: Send + Sync,
     {
         // default server identity in headers
-        upstream_response.insert_header("Server", "ArcX Gateway")?;
+        upstream_response.insert_header("Server", "Glaive Gateway")?;
 
         // insert header for cache status
         if session.cache.enabled() {

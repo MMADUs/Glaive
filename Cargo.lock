@@ -3,7 +3,7 @@
 version = 3
 
 [[package]]
-name = "ArcX"
+name = "Glaive"
 version = "2.0.0"
 dependencies = [
  "ahash",

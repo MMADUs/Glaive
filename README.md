@@ -1,11 +1,11 @@
-# ArcX - API Gateway
+# Glaive - Gateway for Cloud Native
 
-ArcX in an API Gateway built on top of Pingora. Aims for simplicity, performance, and security.
+Glaive in an API Gateway built on top of Pingora. Aims for simplicity, performance, and security.
 
 > [!WARNING]
 > This project is a work-in-progress.
 
-# ArcX Core Features
+# Glaive key Features
 
 - [x] Reverse Proxy
 - [x] Load Balancer

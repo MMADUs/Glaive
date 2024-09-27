@@ -1,7 +1,7 @@
 /**
- * Copyright (c) 2024-2025 ArcX, Inc.
+ * Copyright (c) 2024-2025 Glaive, Inc.
  *
- * This file is part of ArcX Gateway
+ * This file is part of Glaive Gateway
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by

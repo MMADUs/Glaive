@@ -1,7 +1,7 @@
 /**
- * Copyright (c) 2024-2025 ArcX, Inc.
+ * Copyright (c) 2024-2025 Glaive, Inc.
  *
- * This file is part of ArcX Gateway
+ * This file is part of Glaive Gateway
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -43,10 +43,10 @@ fn main() {
 
     // Setup a server
     let opt = Opt::parse_args();
-    let mut arc_server = Server::new(Some(opt)).unwrap();
+    let mut server = Server::new(Some(opt)).unwrap();
     // load configuration and merge to server configuration
-    let cluster_configuration = load_config(&mut arc_server.configuration);
-    arc_server.bootstrap(); // preparing
+    let cluster_configuration = load_config(&mut server.configuration);
+    server.bootstrap(); // preparing
 
     // checks the cluster configuration existence and build the cluster
     let proxy_router = match cluster_configuration {
@@ -54,13 +54,13 @@ fn main() {
             // build the entire cluster from the configuration
             // the built cluster will return the main proxy router and the necessary background processing
             let (proxy_router, clusters, updaters) = build_cluster(cluster_config);
-            // added every cluster background process to arc server
+            // added every cluster background process to server
             for (_idx, cluster_service) in clusters.into_iter().enumerate() {
-                arc_server.add_service(cluster_service);
+                server.add_service(cluster_service);
             }
-            // added every updater background process to arc server
+            // added every updater background process to server
             for (_idx, updater_process) in updaters.into_iter().enumerate() {
-                arc_server.add_service(updater_process);
+                server.add_service(updater_process);
             }
             proxy_router
         },
@@ -70,7 +70,7 @@ fn main() {
             let mut default_prefix = HashMap::new();
             let default = build_cluster_service(&["0:0"]);
             let metadata = ClusterMetadata{
-                name: "ArcX Gateway".to_string(),
+                name: "Glaive Gateway".to_string(),
                 host: "//default//".to_string(),
                 tls: false,
                 rate_limit: None,
@@ -89,10 +89,10 @@ fn main() {
     };
 
     // Build the proxy with the prepared configuration and the main proxy router
-    let mut router_service = http_proxy_service(&arc_server.configuration, proxy_router);
+    let mut router_service = http_proxy_service(&server.configuration, proxy_router);
     // Proxy server port to listen
     router_service.add_tcp("0.0.0.0:6188");
     // Set the main proxy as background process and run forever.
-    arc_server.add_service(router_service);
-    arc_server.run_forever();
+    server.add_service(router_service);
+    server.run_forever();
 }
