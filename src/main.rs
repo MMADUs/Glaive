@@ -75,6 +75,7 @@ fn main() {
                 tls: false,
                 rate_limit: None,
                 cache_storage: None,
+                cache_ttl: None,
                 retry: None,
                 timeout: None,
                 upstream: default.task(),

@@ -205,12 +205,14 @@ impl ProxyHttp for ProxyRouter {
         &self,
         _session: &Session,
         resp: &ResponseHeader,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<RespCacheable> {
+        // select the cluster to get the ttl
+        let cluster = &self.clusters[ctx.cluster_address];
+        let ttl = cluster.cache_ttl.unwrap() as u64;
+        // get current time and set expiry
         let current_time = SystemTime::now();
-        // set cache expiry to 10 seconds
-        // TODO: make the expiry config soon
-        let fresh_until = current_time + Duration::new(10, 0);
+        let fresh_until = current_time + Duration::new(ttl, 0);
         let meta = CacheMeta::new(fresh_until, current_time, 0, 0, resp.clone());
         Ok(RespCacheable::Cacheable(meta))
         // response for no cache

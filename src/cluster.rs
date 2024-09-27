@@ -155,6 +155,7 @@ pub struct ClusterMetadata {
     pub tls: bool,
     pub rate_limit: Option<isize>,
     pub cache_storage: Option<CacheBucket>,
+    pub cache_ttl: Option<usize>,
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
@@ -219,7 +220,7 @@ pub fn build_cluster(
         };
 
         // check if cluster is using cache
-        let cluster_cache_storage_opt = match cluster_conf.cache {
+        let (cluster_cache_storage_opt, cluster_cache_ttl) = match cluster_conf.cache {
             // if cache config found, check the storage strategy
             Some(cache_type) => {
                 // check the storage strategy
@@ -235,14 +236,14 @@ pub fn build_cluster(
                             .with_eviction(LRUEvictionManager::<16>::with_capacity(mega_byte * memory.max_cache, 8192))
                             .with_cache_lock(CacheLock::new(Duration::from_millis(1000)));
                         // return bucket
-                        Some(bucket)
+                        (Some(bucket), Some(memory.cache_ttl))
                     }
                     // if cache using redis
-                    CacheType::Redis { redis } => None
+                    CacheType::Redis { redis } => (None, None)
                 };
                 storage
             },
-            None => None
+            None => (None, None)
         };
 
         // Build the cluster metadata and add it to the cluster list
@@ -252,6 +253,7 @@ pub fn build_cluster(
             tls: cluster_conf.tls.unwrap(),
             rate_limit: cluster_conf.rate_limit,
             cache_storage: cluster_cache_storage_opt,
+            cache_ttl: cluster_cache_ttl,
             retry: cluster_conf.retry,
             timeout: cluster_conf.timeout,
             upstream: cluster_service.task(),
