@@ -35,20 +35,37 @@ use pingora::proxy::http_proxy_service;
 use pingora::server::Server;
 
 use dotenv::dotenv;
+use tracing::info;
+use tracing_subscriber::fmt;
 
 use crate::cluster::build_cluster;
 use crate::config::load_config;
 use crate::default::DefaultProxy;
 
 fn main() {
+    // logger config builder
+    let subscriber = fmt()
+        // Configure various options here
+        .with_target(false)
+        .with_level(true)
+        .with_thread_names(false)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .with_ansi(true)
+        // .compact() // .compact is for non-json option
+        // .json()
+        .finish();
+    // init logger
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
+
     // dotenv init
     dotenv().ok();
-    // logging init
-    tracing_subscriber::fmt::init();
     // get port and build the address
     let port = env::var("PORT").unwrap_or_else(|_| "6188".to_string());
     let formatted_address = format!("0.0.0.0:{}", port);
     let address = formatted_address.as_str();
+
     // Setup a server
     let opt = Opt::parse_args();
     let mut server = Server::new(Some(opt)).unwrap();
@@ -82,6 +99,7 @@ fn main() {
             server.add_service(default);
         }
     };
+    info!("Gateway is listening on {}", address);
     // run the server forever.
     server.run_forever();
 }

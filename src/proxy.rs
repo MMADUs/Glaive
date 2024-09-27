@@ -25,15 +25,10 @@ use pingora::proxy::{ProxyHttp, Session};
 use pingora::{Error, Result as PingoraResult};
 use pingora::http::{ResponseHeader};
 use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
-use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
-use pingora::cache::lock::CacheLock;
 
 use serde::Serialize;
 use async_trait::async_trait;
-use once_cell::sync::Lazy;
 
-use crate::bucket::CacheBucket;
-use crate::cache::MemoryStorage;
 use crate::cluster::ClusterMetadata;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
@@ -43,18 +38,6 @@ pub struct ProxyRouter {
     pub clusters: Vec<ClusterMetadata>,
     pub prefix_map: HashMap<String, usize>,
 }
-
-const MB: usize = 1024 * 1024;
-
-pub static STATIC_CACHE: Lazy<CacheBucket> = Lazy::new(|| {
-    CacheBucket::new(
-        MemoryStorage::with_capacity(8192)
-            .with_reject_empty_body(true)
-            .with_max_file_size(Some(MB * 8))
-    )
-        .with_eviction(LRUEvictionManager::<16>::with_capacity(MB * 128, 8192))
-        .with_cache_lock(CacheLock::new(Duration::from_millis(1000)))
-});
 
 // struct for proxy context
 pub struct RouterCtx {
@@ -93,7 +76,6 @@ impl ProxyHttp for ProxyRouter {
     ) -> PingoraResult<Box<HttpPeer>> {
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
-
         // Set up the upstream
         let upstream = cluster.upstream.select(b"", 256).unwrap(); // Hash doesn't matter for round_robin
         // Set SNI to the cluster's host
@@ -103,7 +85,6 @@ impl ProxyHttp for ProxyRouter {
         peer.options.connection_timeout = Some(Duration::from_millis(timeout));
         Ok(peer)
     }
-
 
     // The request_filter is the first phase that executes in the lifecycle
     // if this lifecycle returns true = the proxy stops | false = continue to upper lifecycle
@@ -153,20 +134,22 @@ impl ProxyHttp for ProxyRouter {
         // get request method
         let method = session.req_header().method.clone();
         // filter if request method is GET and Storage exist
-        if method == "GET" && cluster.cache_storage.is_some() {
-            STATIC_CACHE.enable(session);
+        if method == "GET" {
+            if let Some(cache_storage) = cluster.cache_storage {
+                cache_storage.enable(session);
+            }
         }
         Ok(())
     }
 
     // generate the cache key, if the filter says the response should be cache
     fn cache_key_callback(&self, session: &Session, ctx: &mut Self::CTX) -> PingoraResult<CacheKey> {
+        // select the cluster based on the selected index
+        let cluster = &self.clusters[ctx.cluster_address];
         // generate key based on the uri method
         // this makes the cache meta unique and prevent cache conflict among other routes
         let key = match ctx.uri_origin.clone() {
-            // TODO: make the cache key more unique proper
-            // currently just an origin as temp key
-            Some(origin) => CacheKey::new(&origin, &origin, ""),
+            Some(origin) => CacheKey::new(&cluster.name, &origin, ""),
             None => CacheKey::default(session.req_header())
         };
         Ok(key)
@@ -186,9 +169,8 @@ impl ProxyHttp for ProxyRouter {
         let current_time = SystemTime::now();
         let fresh_until = current_time + Duration::new(ttl, 0);
         let meta = CacheMeta::new(fresh_until, current_time, 0, 0, resp.clone());
+        // cache response
         Ok(RespCacheable::Cacheable(meta))
-        // response for no cache
-        // Ok(RespCacheable::Uncacheable(NoCacheReason::Custom("Your reason")))
     }
 
     // the response filter is responsible for modifying response
@@ -220,7 +202,8 @@ impl ProxyHttp for ProxyRouter {
                 _ => upstream_response.insert_header("x-cache-status", "no-cache")?,
             }
         }
-        // cache duration
+
+        // cache lock duration
         if let Some(d) = session.cache.lock_duration() {
             upstream_response.insert_header("x-cache-lock-time-ms", format!("{}", d.as_millis()))?
         }
@@ -238,7 +221,6 @@ impl ProxyHttp for ProxyRouter {
     ) -> Box<Error> {
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
-
         // check if retry reach limits
         if ctx.proxy_retry > cluster.retry.unwrap_or(1) {
             return e;
