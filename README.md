@@ -5,6 +5,8 @@ Glaive in an API Gateway built on top of Pingora. Aims for simplicity, performan
 > [!WARNING]
 > This project is a work-in-progress.
 
+![Glaive Diagram Image](./asset/glaive_diagram.png)
+
 # Glaive key Features
 
 - [x] Reverse Proxy
