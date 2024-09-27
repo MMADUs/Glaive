@@ -28,18 +28,27 @@ mod cache;
 mod bucket;
 mod default;
 
+use std::env;
+
 use pingora::prelude::Opt;
 use pingora::proxy::http_proxy_service;
 use pingora::server::Server;
+
+use dotenv::dotenv;
 
 use crate::cluster::build_cluster;
 use crate::config::load_config;
 use crate::default::DefaultProxy;
 
 fn main() {
+    // dotenv init
+    dotenv().ok();
     // logging init
     tracing_subscriber::fmt::init();
-
+    // get port and build the address
+    let port = env::var("PORT").unwrap_or_else(|_| "6188".to_string());
+    let formatted_address = format!("0.0.0.0:{}", port);
+    let address = formatted_address.as_str();
     // Setup a server
     let opt = Opt::parse_args();
     let mut server = Server::new(Some(opt)).unwrap();
@@ -63,13 +72,13 @@ fn main() {
             }
             // build the proxy service and listen
             let mut router = http_proxy_service(&server.configuration, proxy_router);
-            router.add_tcp("0.0.0.0:6188");
+            router.add_tcp(address);
             server.add_service(router);
         },
         None => {
             // this is the default proxy trait that runs when configuration does not exist
             let mut default = http_proxy_service(&server.configuration, DefaultProxy{});
-            default.add_tcp("0.0.0.0:6188");
+            default.add_tcp(address);
             server.add_service(default);
         }
     };
