@@ -162,7 +162,7 @@ pub fn build_cluster(
                 match discovery_type {
                     // consul strategy
                     DiscoveryType::Consul { consul } => {
-                        let discovery = discovery.as_ref().expect("Discovery is enabled but consul discovery is not created");
+                        let discovery = discovery.as_ref().expect("Error Consul Connection");
                         consul.build_cluster(discovery, &mut updater_background_process)
                     },
                 }
@@ -177,24 +177,16 @@ pub fn build_cluster(
         };
 
         // check if cluster is using cache
-        let (cluster_cache_storage_opt, cluster_cache_ttl) = match cluster_conf.cache {
+        let (cluster_cache_storage, cluster_cache_ttl) = match cluster_conf.cache {
             // if cache config found, check the storage strategy
             Some(cache_type) => {
                 // check the storage strategy
                 let storage = match cache_type {
                     // if cache uses memory
                     CacheType::Memory { memory } => {
-                        let mega_byte: usize = 1024 * 1024;
-                        let bucket = CacheBucket::new(
-                            MemoryStorage::with_capacity(8192)
-                                .with_reject_empty_body(true)
-                                .with_max_file_size(Some(mega_byte * memory.max_size)),
-                        )
-                            .with_eviction(LRUEvictionManager::<16>::with_capacity(mega_byte * memory.max_cache, 8192))
-                            .with_cache_lock(CacheLock::new(Duration::from_millis(1000)));
-                        // return bucket
-                        (Some(bucket), Some(memory.cache_ttl))
-                    }
+                        let (storage, ttl) = memory.new_storage();
+                        (storage, ttl)
+                    },
                     // if cache using redis
                     // CacheType::Redis { redis } => (None, None)
                 };
@@ -209,7 +201,7 @@ pub fn build_cluster(
             host: cluster_conf.host.unwrap_or("localhost".to_string()),
             tls: cluster_conf.tls.unwrap_or(false),
             rate_limit: cluster_limiter_opt,
-            cache_storage: cluster_cache_storage_opt,
+            cache_storage: cluster_cache_storage,
             cache_ttl: cluster_cache_ttl,
             retry: cluster_conf.retry,
             timeout: cluster_conf.timeout,

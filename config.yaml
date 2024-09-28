@@ -51,7 +51,7 @@ clusters:
         cache_ttl: 10
         max_size: 5
         max_cache: 10
-        lock_timeout: 1000
+        lock_timeout: 5000
     retry: 3
     timeout: 2000
     upstream:

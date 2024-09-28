@@ -17,7 +17,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use std::time::Duration;
+
+use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
+use pingora::cache::lock::CacheLock;
 use serde::{Deserialize, Serialize};
+
+use crate::bucket::CacheBucket;
+use crate::cache::MemoryStorage;
 
 // enum cache type
 #[derive(Debug, Deserialize, Serialize)]
@@ -34,6 +41,24 @@ pub struct MemoryCache {
     pub max_size: usize,
     pub max_cache: usize,
     pub lock_timeout: usize,
+}
+
+impl MemoryCache {
+    pub fn new_storage(&self) -> (
+        Option<CacheBucket>,
+        Option<usize>,
+    ) {
+        let mega_byte: usize = 1024 * 1024;
+        let bucket = CacheBucket::new(
+            MemoryStorage::with_capacity(8192)
+                .with_reject_empty_body(true)
+                .with_max_file_size(Some(mega_byte * self.max_size)),
+        )
+            .with_eviction(LRUEvictionManager::<16>::with_capacity(mega_byte * self.max_cache, 8192))
+            .with_cache_lock(CacheLock::new(Duration::from_millis(self.lock_timeout as u64)));
+        // return bucket and ttl
+        (Some(bucket), Some(self.cache_ttl))
+    }
 }
 
 // redis cache config
