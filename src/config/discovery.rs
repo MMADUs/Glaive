@@ -17,25 +17,47 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use pingora::lb::LoadBalancer;
+use pingora::prelude::RoundRobin;
+use pingora::services::background::GenBackgroundService;
+
 use serde::{Deserialize, Serialize};
+
+use crate::discovery::{Discovery, DiscoveryBackgroundService};
 
 // enum discovery type
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum DiscoveryType {
     Consul { consul: ConsulType },
-    DNS { dns: DNSType },
-    Kubernetes { kubernetes: KubernetesType },
+    // DNS { dns: DNSType },
+    // Kubernetes { kubernetes: KubernetesType },
 }
 
 // hashicorp consul config
 #[derive(Debug, Deserialize, Serialize)]
-struct ConsulType {
+pub struct ConsulType {
     // the service name is mandatory and used for querying to consul
-    name: Option<String>,
+    pub name: String,
     // the passing option determines if the discovery should return healthy/alive services
     // the default is false. set passing to true if you want to get healthy services.
-    passing: Option<bool>,
+    pub passing: bool,
+}
+
+impl ConsulType {
+    pub fn build_cluster(
+        &self,
+        discovery: &Discovery,
+        updater_bg_process: &mut Vec<GenBackgroundService<DiscoveryBackgroundService>>
+    ) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
+        // Build the cluster with discovery
+        let (cluster, updater) = discovery.build_cluster_discovery(
+            self.name.clone(),
+            self.passing.clone(),
+        );
+        updater_bg_process.push(updater);
+        cluster
+    }
 }
 
 // dns config

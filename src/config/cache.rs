@@ -24,16 +24,16 @@ use serde::{Deserialize, Serialize};
 #[serde(untagged)]
 pub enum CacheType {
     Memory { memory: MemoryCache },
-    Redis { redis: RedisCache },
+    // Redis { redis: RedisCache },
 }
 
 // memory cache config
 #[derive(Debug, Deserialize, Serialize)]
-struct MemoryCache {
-    cache_ttl: usize,
-    max_size: usize,
-    max_cache: usize,
-    lock_timeout: usize,
+pub struct MemoryCache {
+    pub cache_ttl: usize,
+    pub max_size: usize,
+    pub max_cache: usize,
+    pub lock_timeout: usize,
 }
 
 // redis cache config

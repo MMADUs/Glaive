@@ -25,68 +25,68 @@ use crate::config::{limiter, discovery, auth, route, cache};
 #[derive(Debug, Deserialize)]
 pub struct ClusterConfig {
     // this is the main service name & its mandatory
-    name: Option<String>,
+    pub name: Option<String>,
     // the prefix is mandatory. responsible for the uri path for the proxy to handle
     // make sure to prevent prefix duplication and invalid format
-    prefix: Option<String>,
+    pub prefix: Option<String>,
     // the host is mandatory. the host is responsible for the SNI and Headers
-    host: Option<String>,
+    pub host: Option<String>,
     // the TLS is mandatory. it checks if the proxy should be secured as HTTPS
-    tls: Option<bool>,
+    pub tls: Option<bool>,
     // discovery allows you to discover services, the default is consul.
     // if the discovery config is provided, the upstream config will be ignored
-    discovery: Option<discovery::DiscoveryType>,
+    pub discovery: Option<discovery::DiscoveryType>,
     // the rate limit responsible for the maximum request to be limited
-    rate_limit: Option<limiter::RatelimitType>,
+    pub rate_limit: Option<limiter::RatelimitType>,
     // the used cache type
-    cache: Option<cache::CacheType>,
+    pub cache: Option<cache::CacheType>,
     // the retry and timout mechanism is provided for connection failures
-    retry: Option<usize>,
-    timeout: Option<u64>,
+    pub retry: Option<usize>,
+    pub timeout: Option<u64>,
     // the global auth strategy for the service
-    auth: Option<auth::AuthType>,
+    pub auth: Option<auth::AuthType>,
     // the upstream is the hardcoded uri for proxy
     // note: the upstream will be ignored if you provide discovery in the configuration
-    upstream: Option<Vec<String>>,
+    pub upstream: Option<Vec<String>>,
     // routes or endpoint configuration
-    routes: Option<Vec<route::Route>>,
+    pub routes: Option<Vec<route::Route>>,
 }
 
 impl ClusterConfig {
-    fn get_name(&self) -> &Option<String> {
+    pub fn get_name(&self) -> &Option<String> {
         &self.name
     }
-    fn get_prefix(&self) -> &Option<String> {
+    pub fn get_prefix(&self) -> &Option<String> {
         &self.prefix
     }
-    fn get_host(&self) -> &Option<String> {
+    pub fn get_host(&self) -> &Option<String> {
         &self.host
     }
-    fn get_tls(&self) -> &Option<bool> {
+    pub fn get_tls(&self) -> &Option<bool> {
         &self.tls
     }
-    fn get_discovery(&self) -> &Option<discovery::DiscoveryType> {
+    pub fn get_discovery(&self) -> &Option<discovery::DiscoveryType> {
         &self.discovery
     }
-    fn get_rate_limit(&self) -> &Option<limiter::RatelimitType> {
+    pub fn get_rate_limit(&self) -> &Option<limiter::RatelimitType> {
         &self.rate_limit
     }
-    fn get_cache(&self) -> &Option<cache::CacheType> {
+    pub fn get_cache(&self) -> &Option<cache::CacheType> {
         &self.cache
     }
-    fn get_retry(&self) -> &Option<usize> {
+    pub fn get_retry(&self) -> &Option<usize> {
         &self.retry
     }
-    fn get_timeout(&self) -> &Option<u64> {
+    pub fn get_timeout(&self) -> &Option<u64> {
         &self.timeout
     }
-    fn get_auth(&self) -> &Option<auth::AuthType> {
+    pub fn get_auth(&self) -> &Option<auth::AuthType> {
         &self.auth
     }
-    fn get_upstream(&self) -> &Option<Vec<String>> {
+    pub fn get_upstream(&self) -> &Option<Vec<String>> {
         &self.upstream
     }
-    fn get_routes(&self) -> &Option<Vec<Route>> {
+    pub fn get_routes(&self) -> &Option<Vec<route::Route>> {
         &self.routes
     }
 }

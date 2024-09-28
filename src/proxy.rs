@@ -26,10 +26,11 @@ use pingora::{Error, Result as PingoraResult};
 use pingora::http::{ResponseHeader};
 use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
 
-use serde::Serialize;
 use async_trait::async_trait;
 
 use crate::cluster::ClusterMetadata;
+use crate::config::limiter::RatelimitType;
+use crate::config::consumer::Consumer;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
 
@@ -37,6 +38,7 @@ use crate::limiter::rate_limiter;
 pub struct ProxyRouter {
     pub clusters: Vec<ClusterMetadata>,
     pub prefix_map: HashMap<String, usize>,
+    pub consumers: Option<Vec<Consumer>>,
 }
 
 // struct for proxy context
@@ -44,15 +46,6 @@ pub struct RouterCtx {
     pub cluster_address: usize,
     pub proxy_retry: usize,
     pub uri_origin: Option<String>,
-}
-
-// the struct for default proxy response
-#[derive(Serialize)]
-struct Default {
-    server: String,
-    version: String,
-    message: String,
-    github: String,
 }
 
 #[async_trait]
@@ -111,17 +104,21 @@ impl ProxyHttp for ProxyRouter {
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
 
-        // validate if rate limit exist from config
-        match cluster.rate_limit {
-            Some(limit) => {
-                // rate limit incoming request
-                let limiter_result = rate_limiter(limit, session, ctx).await;
-                match limiter_result {
-                    true => return Ok(true),
-                    false => (),
+        // check if rate limiter is enabled
+        match &cluster.rate_limit {
+            Some(rate_limit_type) => {
+                match rate_limit_type {
+                    RatelimitType::Basic { basic} => {
+                        // rate limit incoming request
+                        let limiter_result = rate_limiter(basic.limit, session, ctx).await;
+                        match limiter_result {
+                            true => return Ok(true),
+                            false => (),
+                        }
+                    }
                 }
-            },
-            None => (),
+            }
+            None => {},
         }
         // continue the request
         Ok(false)

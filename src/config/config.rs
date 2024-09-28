@@ -93,14 +93,21 @@ fn load_yaml(file_path: &str) -> Configuration {
     serde_yaml::from_reader(file).expect("Unable to parse YAML")
 }
 
+// our main gateway configuration
+#[derive(Debug)]
+pub struct GatewayConfig {
+    pub clusters: Option<Vec<cluster::ClusterConfig>>,
+    pub consumers: Option<Vec<consumer::Consumer>>,
+}
+
 // load config from yaml and merge to server configuration
 pub fn load_config(
     server_config: &mut Arc<ServerConf>,
-) -> Option<Vec<ClusterConfig>> {
+) -> GatewayConfig {
     // load and parse the yaml file as configuration
     // TODO: the file path should be configurable soon.
     let config = load_yaml("config.yaml");
-    let server_config = Arc::get_mut(server_config)?;
+    let server_config = Arc::get_mut(server_config).unwrap();
 
     // version
     if let Some(version) = config.version {
@@ -174,6 +181,10 @@ pub fn load_config(
     if let Some(upstream_debug_ssl_keylog) = config.upstream_debug_ssl_keylog {
         server_config.upstream_debug_ssl_keylog = upstream_debug_ssl_keylog.clone();
     }
-    // return clusters
-    config.clusters
+    // return our main config
+    let gateway_conf = GatewayConfig {
+        clusters: config.clusters,
+        consumers: config.consumers,
+    };
+    gateway_conf
 }

@@ -63,7 +63,7 @@ impl Discovery {
     pub fn new_consul_discovery() -> Discovery {
         let mut config = Config::default();
         config.address = "http://localhost:8500".to_string();
-        config.token = Some("218c8f86-5c49-af4c-f57e-07d2a1b0aee4".to_string());
+        config.token = Some("71c1eb41-5777-7698-96e5-426a325000ea".to_string());
         println!("consul address: {:?}", &config.address);
         println!("consul token: {:?}", &config.token);
         Discovery { consul: Arc::new(Consul::new(config)) }

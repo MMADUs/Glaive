@@ -24,12 +24,14 @@ use serde::{Deserialize, Serialize};
 #[serde(untagged)]
 pub enum RatelimitType {
     Basic { basic: BasicLimiter },
-    Redis { redis: RedisLimiter },
+    // Redis { redis: RedisLimiter },
 }
 
 // basic limiter config
 #[derive(Debug, Deserialize, Serialize)]
-struct BasicLimiter {}
+pub struct BasicLimiter {
+    pub limit: isize,
+}
 
 // redis limiter config
 #[derive(Debug, Deserialize, Serialize)]

@@ -41,6 +41,7 @@ use tracing_subscriber::fmt;
 use crate::cluster::build_cluster;
 use crate::config::config::load_config;
 use crate::default::DefaultProxy;
+use crate::proxy::ProxyRouter;
 
 fn main() {
     // logger config builder
@@ -70,24 +71,29 @@ fn main() {
     let opt = Opt::parse_args();
     let mut server = Server::new(Some(opt)).unwrap();
     // load configuration and merge to server configuration
-    let cluster_configuration = load_config(&mut server.configuration);
+    let gateway_configuration = load_config(&mut server.configuration);
     server.bootstrap(); // preparing
 
     // checks the cluster configuration existence and build the cluster
-    match cluster_configuration {
+    match gateway_configuration.clusters {
         Some(cluster_config) => {
             // build the entire cluster from the configuration
             // the built cluster will return the main proxy router and the necessary background processing
-            let (proxy_router, clusters, updaters) = build_cluster(cluster_config);
+            let built_clusters = build_cluster(cluster_config);
             // added every cluster background process to server
-            for (_idx, cluster_service) in clusters.into_iter().enumerate() {
+            for (_idx, cluster_service) in built_clusters.cluster_bg_service.into_iter().enumerate() {
                 server.add_service(cluster_service);
             }
             // added every updater background process to server
-            for (_idx, updater_process) in updaters.into_iter().enumerate() {
+            for (_idx, updater_process) in built_clusters.updater_bg_service.into_iter().enumerate() {
                 server.add_service(updater_process);
             }
             // build the proxy service and listen
+            let proxy_router = ProxyRouter {
+                clusters: built_clusters.clusters,
+                prefix_map: built_clusters.prefix_map,
+                consumers: gateway_configuration.consumers,
+            };
             let mut router = http_proxy_service(&server.configuration, proxy_router);
             router.add_tcp(address);
             server.add_service(router);

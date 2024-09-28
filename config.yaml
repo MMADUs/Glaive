@@ -38,8 +38,14 @@ clusters:
   - name: two
     host: "localhost"
     tls: false
+    discovery:
+      consul:
+        name: "test-service"
+        passing: true
+    rate_limit:
+      basic:
+        limit: 100
     prefix: "/two"
-    rate_limit: 100
     cache:
       memory:
         cache_ttl: 10
@@ -48,17 +54,9 @@ clusters:
         lock_timeout: 1000
     retry: 3
     timeout: 2000
-
-    auth:
-      key:
-        strategy: bearer
-      jwt:
-        strategy: bearer
-
     upstream:
       - "localhost:8000"
       - "localhost:8001"
-
     routes:
       - name: "view-only-acl"
         paths:
@@ -73,14 +71,11 @@ clusters:
               value: "header-value"
           remove:
             - key: "header-key"
-        auth:
-
         consumers:
           - name: "user"
             acl:
               - "view-product"
               - "view-order"
-
       - name: "view-only-acl"
         paths:
           - "/product"
@@ -93,18 +88,19 @@ clusters:
             - key: "header-key"
               value: "header-value"
           remove:
-            - "header-key"
+            - key: "header-key"
         consumers:
           - name: "buyers"
             acl:
               - "view-product"
               - "view-order"
-
   - name: three
     host: "localhost"
     tls: false
     prefix: "/three"
-    rate_limit: 200
+    rate_limit:
+      basic:
+        limit: 100
     retry: 3
     timeout: 2000
     upstream:
@@ -114,7 +110,9 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/four"
-    rate_limit: 200
+    rate_limit:
+      basic:
+        limit: 100
     retry: 3
     timeout: 2000
     upstream:

@@ -20,77 +20,21 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+
 use pingora::cache::lock::CacheLock;
 use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
 use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
 
-use serde::{Deserialize, Serialize};
 use crate::bucket::CacheBucket;
 use crate::cache::MemoryStorage;
+use crate::config::cache::CacheType;
+use crate::config::discovery::DiscoveryType;
 use crate::proxy::ProxyRouter;
 use crate::discovery::{Discovery, DiscoveryBackgroundService};
-
-// Raw individual cluster configuration
-#[derive(Debug, Deserialize)]
-pub struct ClusterConfig {
-    // this is the main service name & its mandatory
-    name: Option<String>,
-    // the prefix is mandatory. responsible for the uri path for the proxy to handle
-    // make sure to prevent prefix duplication and invalid format
-    prefix: Option<String>,
-    // the host is mandatory. the host is responsible for the SNI and Headers
-    host: Option<String>,
-    // the TLS is mandatory. it checks if the proxy should be secured as HTTPS
-    tls: Option<bool>,
-    // discovery allows you to discover services, the default is consul.
-    // if the discovery config is provided, the upstream config will be ignored
-    discovery: Option<DiscoveryConfig>,
-    // the rate limit responsible for the maximum request to be limited
-    rate_limit: Option<isize>,
-    // the used cache type
-    cache: Option<CacheType>,
-    // the retry and timout mechanism is provided for connection failures
-    retry: Option<usize>,
-    timeout: Option<u64>,
-    // the upstream is the hardcoded uri for proxy
-    // note: the upstream will be ignored if you provide discovery in the configuration
-    upstream: Vec<String>,
-}
-
-// Raw discovery configuration
-#[derive(Debug, Deserialize)]
-pub struct DiscoveryConfig {
-    // the service name is mandatory and used for querying to consul
-    name: Option<String>,
-    // the passing option determines if the discovery should return healthy/alive services
-    // the default is false. set passing to true if you want to get healthy services.
-    passing: Option<bool>,
-}
-
-// Struct for memory cache configuration
-#[derive(Debug, Deserialize, Serialize)]
-struct MemoryCache {
-    cache_ttl: usize,
-    max_size: usize,
-    max_cache: usize,
-    lock_timeout: usize,
-}
-
-// Struct for redis cache configuration
-#[derive(Debug, Deserialize, Serialize)]
-struct RedisCache {
-    cache_ttl: usize,
-}
-
-// enum cache type
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum CacheType {
-    Memory { memory: MemoryCache },
-    Redis { redis: RedisCache },
-}
+use crate::config::cluster::ClusterConfig;
+use crate::config::limiter::RatelimitType;
 
 // build the cluster with hardcoded upstream
 pub fn build_cluster_service(
@@ -109,7 +53,7 @@ pub fn build_cluster_service(
 // validate clusters configuration
 fn validate_cluster_config(config: &ClusterConfig) -> bool {
     // mandatory cluster identity
-    if config.name.is_none() || config.prefix.is_none() || config.host.is_none() || config.tls.is_none() || config.upstream.is_empty() {
+    if config.name.is_none() || config.prefix.is_none() || config.host.is_none() || config.tls.is_none() {
         println!("CLUSTER IDENTITY ERROR");
         return false;
     }
@@ -153,7 +97,7 @@ pub struct ClusterMetadata {
     pub name: String,
     pub host: String,
     pub tls: bool,
-    pub rate_limit: Option<isize>,
+    pub rate_limit: Option<RatelimitType>,
     pub cache_storage: Option<CacheBucket>,
     pub cache_ttl: Option<usize>,
     pub retry: Option<usize>,
@@ -161,14 +105,18 @@ pub struct ClusterMetadata {
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
 }
 
+// return type for built clusters
+pub struct BuiltClusters {
+    pub clusters: Vec<ClusterMetadata>,
+    pub prefix_map: HashMap<String, usize>,
+    pub cluster_bg_service: Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>,
+    pub updater_bg_service: Vec<GenBackgroundService<DiscoveryBackgroundService>>,
+}
+
 // build the entire cluster from the configuration
 pub fn build_cluster(
     yaml_clusters_configuration: Vec<ClusterConfig>
-) -> (
-    ProxyRouter,
-    Vec<GenBackgroundService<LoadBalancer<RoundRobin>>>,
-    Vec<GenBackgroundService<DiscoveryBackgroundService>>,
-){
+) -> BuiltClusters {
     // Validate if there is prefix duplication
     match validate_duplicated_prefix(&yaml_clusters_configuration) {
         true => panic!("found duplicated upstream prefix"),
@@ -200,23 +148,32 @@ pub fn build_cluster(
             false => panic!("invalid upstream configuration")
         }
 
-        // Check if the cluster uses discovery
-        let cluster_service = if let Some(discovery_conf) = cluster_conf.discovery {
-            // Ensure discovery has been initialized
-            let discovery_builder = discovery.as_ref().expect("Discovery is enabled but consul discovery is not created");
-            // Build the cluster with discovery
-            let (cluster, updater) = discovery_builder.build_cluster_discovery(
-                discovery_conf.name.unwrap(),
-                discovery_conf.passing.unwrap_or(false),
-            );
-            updater_background_process.push(updater);
-            cluster
-        } else {
-            // Build default hardcoded http cluster
-            let cluster = build_cluster_service(
-                &cluster_conf.upstream.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-            );
-            cluster
+        // Check if cluster uses rate limit
+        let cluster_limiter_opt = match cluster_conf.rate_limit {
+            Some(limit_type) => Some(limit_type),
+            None => None,
+        };
+
+        // Check if cluster uses discovery, otherwise build the hardcoded upstream uri
+        let cluster_service = match cluster_conf.discovery {
+            // if the cluster used discovery
+            Some(discovery_type) => {
+                // select and build based on discovery strategy
+                match discovery_type {
+                    // consul strategy
+                    DiscoveryType::Consul { consul } => {
+                        let discovery = discovery.as_ref().expect("Discovery is enabled but consul discovery is not created");
+                        consul.build_cluster(discovery, &mut updater_background_process)
+                    },
+                }
+            }
+            None => {
+                // Build default hardcoded http cluster
+                let cluster = build_cluster_service(
+                    &cluster_conf.upstream.unwrap().iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                );
+                cluster
+            },
         };
 
         // check if cluster is using cache
@@ -239,7 +196,7 @@ pub fn build_cluster(
                         (Some(bucket), Some(memory.cache_ttl))
                     }
                     // if cache using redis
-                    CacheType::Redis { redis } => (None, None)
+                    // CacheType::Redis { redis } => (None, None)
                 };
                 storage
             },
@@ -248,10 +205,10 @@ pub fn build_cluster(
 
         // Build the cluster metadata and add it to the cluster list
         clusters.push( ClusterMetadata {
-            name: cluster_conf.name.unwrap(),
-            host: cluster_conf.host.unwrap(),
-            tls: cluster_conf.tls.unwrap(),
-            rate_limit: cluster_conf.rate_limit,
+            name: cluster_conf.name.unwrap_or("unnamed-cluster".to_string()),
+            host: cluster_conf.host.unwrap_or("localhost".to_string()),
+            tls: cluster_conf.tls.unwrap_or(false),
+            rate_limit: cluster_limiter_opt,
             cache_storage: cluster_cache_storage_opt,
             cache_ttl: cluster_cache_ttl,
             retry: cluster_conf.retry,
@@ -265,10 +222,11 @@ pub fn build_cluster(
     }
 
     // Set the list of clusters and prefixes to the main proxy router
-    let main_router = ProxyRouter{
+    let built = BuiltClusters {
         clusters,
         prefix_map,
+        cluster_bg_service: cluster_background_process,
+        updater_bg_service: updater_background_process,
     };
-    // return all to be applied to the server instances.
-    (main_router, cluster_background_process, updater_background_process)
+    built
 }
