@@ -21,12 +21,12 @@ mod cluster;
 mod path;
 mod proxy;
 mod limiter;
-mod config;
 mod auth;
 mod discovery;
 mod cache;
 mod bucket;
 mod default;
+mod config;
 
 use std::env;
 
@@ -39,7 +39,7 @@ use tracing::info;
 use tracing_subscriber::fmt;
 
 use crate::cluster::build_cluster;
-use crate::config::load_config;
+use crate::config::config::load_config;
 use crate::default::DefaultProxy;
 
 fn main() {

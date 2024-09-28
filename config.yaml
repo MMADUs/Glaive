@@ -48,9 +48,58 @@ clusters:
         lock_timeout: 1000
     retry: 3
     timeout: 2000
+
+    auth:
+      key:
+        strategy: bearer
+      jwt:
+        strategy: bearer
+
     upstream:
       - "localhost:8000"
       - "localhost:8001"
+
+    routes:
+      - name: "view-only-acl"
+        paths:
+          - "/product"
+          - "/order"
+        methods:
+          - GET
+          - POST
+        headers:
+          insert:
+            - key: "header-key"
+              value: "header-value"
+          remove:
+            - key: "header-key"
+        auth:
+
+        consumers:
+          - name: "user"
+            acl:
+              - "view-product"
+              - "view-order"
+
+      - name: "view-only-acl"
+        paths:
+          - "/product"
+          - "/order"
+        methods:
+          - GET
+          - POST
+        headers:
+          insert:
+            - key: "header-key"
+              value: "header-value"
+          remove:
+            - "header-key"
+        consumers:
+          - name: "buyers"
+            acl:
+              - "view-product"
+              - "view-order"
+
   - name: three
     host: "localhost"
     tls: false
@@ -71,3 +120,13 @@ clusters:
     upstream:
       - "localhost:8000"
       - "localhost:8001"
+
+consumers:
+  - name: "admin"
+    acl:
+      - "edit-product"
+      - "delete-product"
+  - name: "user"
+    acl:
+      - "view-product"
+      - "search-product"

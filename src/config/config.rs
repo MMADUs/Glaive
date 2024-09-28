@@ -19,9 +19,12 @@
 
 use std::fs::File;
 use std::sync::Arc;
+
 use pingora::server::configuration::ServerConf;
+
 use serde::Deserialize;
-use crate::cluster::ClusterConfig;
+
+use crate::config::{cluster, consumer};
 
 #[derive(Debug, Deserialize)]
 struct Configuration {
@@ -79,7 +82,9 @@ struct Configuration {
     /// Note: this is an _unstable_ field that may be renamed or removed in the future.
     pub upstream_debug_ssl_keylog: Option<bool>,
     /// Upper stream Cluster Configurations
-    pub clusters: Option<Vec<ClusterConfig>>,
+    pub clusters: Option<Vec<cluster::ClusterConfig>>,
+    /// Consumers list, this act something as database for the acl
+    pub consumers: Option<Vec<consumer::Consumer>>,
 }
 
 // parse yaml file to configuration based on provided path
