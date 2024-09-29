@@ -39,6 +39,24 @@ pub struct Route {
     consumers: Option<Vec<consumer::Consumer>>,
 }
 
+impl Route {
+    pub fn get_name(&self) -> &Option<String> {
+        &self.name
+    }
+    pub fn get_paths(&self) -> &Option<Vec<String>> {
+        &self.paths
+    }
+    pub fn get_methods(&self) -> &Option<Vec<String>> {
+        &self.methods
+    }
+    pub fn get_auth(&self) -> &Option<auth::AuthType> {
+        &self.auth
+    }
+    pub fn get_consumers(&self) -> &Option<Vec<consumer::Consumer>> {
+        &self.consumers
+    }
+}
+
 // headers config
 #[derive(Debug, Deserialize, Serialize)]
 struct Headers {
@@ -46,6 +64,15 @@ struct Headers {
     insert: Vec<InsertHeader>,
     // used for removing a list of headers
     remove: Vec<RemoveHeader>,
+}
+
+impl Headers {
+    pub fn to_be_inserted(&self) -> &Vec<InsertHeader> {
+        &self.insert
+    }
+    pub fn to_be_removed(&self) -> &Vec<RemoveHeader> {
+        &self.remove
+    }
 }
 
 // insert header config
@@ -57,9 +84,22 @@ struct InsertHeader {
     value: String,
 }
 
+impl InsertHeader {
+    pub fn insert_header(&self) {
+        let key = self.key.clone();
+        let value = self.value.clone();
+    }
+}
+
 // remove header config
 #[derive(Debug, Deserialize, Serialize)]
 struct RemoveHeader {
     // header key
     key: String,
+}
+
+impl RemoveHeader {
+    pub fn remove_header(&self) {
+        let key = self.key.clone();
+    }
 }

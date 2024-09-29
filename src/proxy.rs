@@ -105,20 +105,42 @@ impl ProxyHttp for ProxyRouter {
         let cluster = &self.clusters[ctx.cluster_address];
 
         // check if rate limiter is enabled
-        match &cluster.rate_limit {
-            Some(rate_limit_type) => {
-                match rate_limit_type {
-                    RatelimitType::Basic { basic} => {
-                        // rate limit incoming request
-                        let limiter_result = rate_limiter(basic.limit, session, ctx).await;
-                        match limiter_result {
-                            true => return Ok(true),
-                            false => (),
-                        }
+        if let Some(limiter_type) = cluster.get_rate_limit() {
+            match limiter_type {
+                RatelimitType::Basic { basic} => {
+                    // rate limit incoming request
+                    let limiter_result = rate_limiter(basic.limit, session, ctx).await;
+                    match limiter_result {
+                        true => return Ok(true),
+                        false => (),
                     }
                 }
             }
-            None => {},
+        }
+
+        // check if routes are declared in config
+        if let Some(routes) = cluster.get_routes() {
+            // get current path
+            let cloned_new_header = session.req_header();
+            let path = cloned_new_header.uri.path();
+            // check if the current uri matches any of the listed routes
+            let path_exist = routes
+                .iter()
+                .any(|route| {
+                    // check if routes provide a path
+                    if let Some(route_paths) = route.get_paths() {
+                        // find the current ui in the list of path
+                        route_paths.iter().any(|route_path| {
+                            path == route_path
+                        })
+                    } else {
+                        false
+                    }
+                });
+            // validate if path exist
+            if path_exist {
+                println!("uri path match: {}", path)
+            }
         }
         // continue the request
         Ok(false)
@@ -132,8 +154,8 @@ impl ProxyHttp for ProxyRouter {
         let method = session.req_header().method.clone();
         // filter if request method is GET and Storage exist
         if method == "GET" {
-            if let Some(cache_storage) = cluster.cache_storage {
-                cache_storage.enable(session);
+            if let Some(storage) = cluster.get_cache_storage() {
+                storage.enable(session)
             }
         }
         Ok(())
@@ -146,7 +168,7 @@ impl ProxyHttp for ProxyRouter {
         // generate key based on the uri method
         // this makes the cache meta unique and prevent cache conflict among other routes
         let key = match ctx.uri_origin.clone() {
-            Some(origin) => CacheKey::new(&cluster.name, &origin, ""),
+            Some(origin) => CacheKey::new(cluster.get_name(), &origin, ""),
             None => CacheKey::default(session.req_header())
         };
         Ok(key)
@@ -161,7 +183,7 @@ impl ProxyHttp for ProxyRouter {
     ) -> PingoraResult<RespCacheable> {
         // select the cluster to get the ttl
         let cluster = &self.clusters[ctx.cluster_address];
-        let ttl = cluster.cache_ttl.unwrap() as u64;
+        let ttl = cluster.get_cache_ttl().unwrap_or(2) as u64;
         // get current time and set expiry
         let current_time = SystemTime::now();
         let fresh_until = current_time + Duration::new(ttl, 0);
@@ -219,7 +241,8 @@ impl ProxyHttp for ProxyRouter {
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
         // check if retry reach limits
-        if ctx.proxy_retry > cluster.retry.unwrap_or(1) {
+        let max_try = cluster.get_retry().unwrap_or(1);
+        if ctx.proxy_retry > max_try {
             return e;
         }
         // set to be retryable

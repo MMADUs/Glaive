@@ -24,6 +24,7 @@ use pingora::proxy::Session;
 
 use crate::proxy::RouterCtx;
 
+// used to determine which cluster is selected
 pub async fn select_cluster(
     prefix_map: &HashMap<String, usize>,
     original_uri: &str,

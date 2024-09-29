@@ -29,9 +29,6 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    pub fn new(name: String, acl: Vec<String>) -> Self {
-        Self { name, acl }
-    }
     fn get_name(&self) -> String {
         self.name.clone()
     }

@@ -21,20 +21,19 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use pingora::cache::lock::CacheLock;
 use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
-use pingora::cache::eviction::lru::Manager as LRUEvictionManager;
 
 use crate::bucket::CacheBucket;
-use crate::cache::MemoryStorage;
+use crate::config::auth::AuthType;
 use crate::config::cache::CacheType;
 use crate::config::discovery::DiscoveryType;
-use crate::proxy::ProxyRouter;
 use crate::discovery::{Discovery, DiscoveryBackgroundService};
 use crate::config::cluster::ClusterConfig;
 use crate::config::limiter::RatelimitType;
+use crate::config::route;
+use crate::config::route::Route;
 
 // build the cluster with hardcoded upstream
 pub fn build_cluster_service(
@@ -102,7 +101,45 @@ pub struct ClusterMetadata {
     pub cache_ttl: Option<usize>,
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
+    pub auth: Option<AuthType>,
+    pub routes: Option<Vec<Route>>,
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
+}
+
+impl ClusterMetadata {
+    pub fn get_name(&self) -> &String {
+        &self.name
+    }
+    pub fn get_host(&self) -> &String {
+        &self.host
+    }
+    pub fn get_tls(&self) -> &bool {
+        &self.tls
+    }
+    pub fn get_rate_limit(&self) -> &Option<RatelimitType> {
+        &self.rate_limit
+    }
+    pub fn get_cache_storage(&self) -> &Option<CacheBucket> {
+        &self.cache_storage
+    }
+    pub fn get_cache_ttl(&self) -> &Option<usize> {
+        &self.cache_ttl
+    }
+    pub fn get_retry(&self) -> &Option<usize> {
+      &self.retry
+    }
+    pub fn get_timeout(&self) -> &Option<u64> {
+        &self.timeout
+    }
+    pub fn get_auth(&self) -> &Option<AuthType> {
+        &self.auth
+    }
+    pub fn get_routes(&self) -> &Option<Vec<Route>> {
+        &self.routes
+    }
+    pub fn get_upstream(&self) -> &Arc<LoadBalancer<RoundRobin>> {
+        &self.upstream
+    }
 }
 
 // return type for built clusters
@@ -205,6 +242,8 @@ pub fn build_cluster(
             cache_ttl: cluster_cache_ttl,
             retry: cluster_conf.retry,
             timeout: cluster_conf.timeout,
+            auth: cluster_conf.auth,
+            routes: cluster_conf.routes,
             upstream: cluster_service.task(),
         });
         // Add every cluster process to the list of cluster background processing

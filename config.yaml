@@ -38,10 +38,10 @@ clusters:
   - name: two
     host: "localhost"
     tls: false
-    discovery:
-      consul:
-        name: "test-service"
-        passing: true
+#    discovery:
+#      consul:
+#        name: "test-service"
+#        passing: true
     rate_limit:
       basic:
         limit: 100
@@ -62,6 +62,7 @@ clusters:
         paths:
           - "/product"
           - "/order"
+          - "/api"
         methods:
           - GET
           - POST

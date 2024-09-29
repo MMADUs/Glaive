@@ -31,7 +31,7 @@ use pingora::protocols::l4::socket::SocketAddr as PingoraSocketAddr;
 use pingora::server::ShutdownWatch;
 
 use async_trait::async_trait;
-use rs_consul::{Consul, Config, GetServiceNodesRequest, ResponseMeta};
+use rs_consul::{Consul, Config, GetServiceNodesRequest, ResponseMeta, RegisterEntityPayload, RegisterEntityService, RegisterEntityCheck};
 
 // consul connection test
 #[tokio::test]
@@ -66,7 +66,8 @@ impl Discovery {
         config.token = Some("71c1eb41-5777-7698-96e5-426a325000ea".to_string());
         println!("consul address: {:?}", &config.address);
         println!("consul token: {:?}", &config.token);
-        Discovery { consul: Arc::new(Consul::new(config)) }
+        let client = Consul::new(config);
+        Discovery { consul: Arc::new(client) }
     }
 
     // build the cluster with discovery configuration
@@ -123,6 +124,28 @@ impl ConsulServiceDiscovery {
 
     // the main utilities to discover and returning the backends
     async fn discover_backends(&self) ->  PingoraResult<Vec<Backend>> {
+        let gateway_service = RegisterEntityService {
+            ID: None,
+            Service: "Glaive-Gateway".to_string(),
+            Tags: vec![],
+            TaggedAddresses: Default::default(),
+            Meta: Default::default(),
+            Port: Some(6188),
+            Namespace: None,
+        };
+        let register_payload = RegisterEntityPayload {
+            ID: None,
+            Node: "server-1".to_string(),
+            Address: "172.25.207.30".to_string(),
+            Datacenter: None,
+            TaggedAddresses: Default::default(),
+            NodeMeta: Default::default(),
+            Service: Some(gateway_service),
+            Check: None,
+            SkipNodeUpdate: None,
+        };
+        // register gateway to consul
+        self.consul.register_entity(&register_payload).await.expect("Failed to connect to consul");
         // discovery request
         let discover_req = GetServiceNodesRequest {
             service: &*self.service_name,
