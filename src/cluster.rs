@@ -31,8 +31,7 @@ use crate::config::cache::CacheType;
 use crate::config::discovery::DiscoveryType;
 use crate::discovery::{Discovery, DiscoveryBackgroundService};
 use crate::config::cluster::ClusterConfig;
-use crate::config::limiter::RatelimitType;
-use crate::config::route;
+use crate::config::limiter::Limiter;
 use crate::config::route::Route;
 
 // build the cluster with hardcoded upstream
@@ -96,7 +95,7 @@ pub struct ClusterMetadata {
     pub name: String,
     pub host: String,
     pub tls: bool,
-    pub rate_limit: Option<RatelimitType>,
+    pub limiter: Option<Limiter>,
     pub cache_storage: Option<CacheBucket>,
     pub cache_ttl: Option<usize>,
     pub retry: Option<usize>,
@@ -116,8 +115,8 @@ impl ClusterMetadata {
     pub fn get_tls(&self) -> &bool {
         &self.tls
     }
-    pub fn get_rate_limit(&self) -> &Option<RatelimitType> {
-        &self.rate_limit
+    pub fn get_rate_limit(&self) -> &Option<Limiter> {
+        &self.limiter
     }
     pub fn get_cache_storage(&self) -> &Option<CacheBucket> {
         &self.cache_storage
@@ -185,12 +184,6 @@ pub fn build_cluster(
             false => panic!("invalid upstream configuration")
         }
 
-        // Check if cluster uses rate limit
-        let cluster_limiter_opt = match cluster_conf.rate_limit {
-            Some(limit_type) => Some(limit_type),
-            None => None,
-        };
-
         // Check if cluster uses discovery, otherwise build the hardcoded upstream uri
         let cluster_service = match cluster_conf.discovery {
             // if the cluster used discovery
@@ -237,7 +230,7 @@ pub fn build_cluster(
             name: cluster_conf.name.unwrap_or("unnamed-cluster".to_string()),
             host: cluster_conf.host.unwrap_or("localhost".to_string()),
             tls: cluster_conf.tls.unwrap_or(false),
-            rate_limit: cluster_limiter_opt,
+            limiter: cluster_conf.rate_limit,
             cache_storage: cluster_cache_storage,
             cache_ttl: cluster_cache_ttl,
             retry: cluster_conf.retry,

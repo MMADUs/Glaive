@@ -43,8 +43,12 @@ clusters:
 #        name: "test-service"
 #        passing: true
     rate_limit:
-      basic:
-        limit: 100
+      global:
+        basic:
+          limit: 100
+      client:
+        basic:
+          limit: 100
     prefix: "/two"
     cache:
       memory:
@@ -79,8 +83,8 @@ clusters:
               - "view-order"
       - name: "view-only-acl"
         paths:
-          - "/product"
-          - "/order"
+          - "/pay"
+          - "/support"
         methods:
           - GET
           - POST

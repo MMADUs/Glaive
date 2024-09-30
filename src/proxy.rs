@@ -105,14 +105,30 @@ impl ProxyHttp for ProxyRouter {
         let cluster = &self.clusters[ctx.cluster_address];
 
         // check if rate limiter is enabled
-        if let Some(limiter_type) = cluster.get_rate_limit() {
-            match limiter_type {
-                RatelimitType::Basic { basic} => {
-                    // rate limit incoming request
-                    let limiter_result = rate_limiter(basic.limit, session, ctx).await;
-                    match limiter_result {
-                        true => return Ok(true),
-                        false => (),
+        if let Some(limiter) = cluster.get_rate_limit() {
+            // check if global limiter is provided for this cluster
+            if let Some(global_limiter_type) = limiter.get_global() {
+                match global_limiter_type {
+                    RatelimitType::Basic { basic} => {
+                        // rate limit incoming request
+                        let limiter_result = rate_limiter(basic.limit, session, ctx).await;
+                        match limiter_result {
+                            true => return Ok(true),
+                            false => (),
+                        }
+                    }
+                }
+            }
+            // check if client limiter is provided for this cluster
+            if let Some(client_limiter_type) = limiter.get_client() {
+                match client_limiter_type {
+                    RatelimitType::Basic { basic } => {
+                        // rate limit incoming request
+                        let limiter_result = rate_limiter(basic.limit, session, ctx).await;
+                        match limiter_result {
+                            true => return Ok(true),
+                            false => (),
+                        }
                     }
                 }
             }

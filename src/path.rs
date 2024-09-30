@@ -43,6 +43,9 @@ pub async fn select_cluster(
             idx
         });
 
+    println!("Original URI: {}", original_uri);
+    println!("Modified URI: {}", modified_uri);
+
     // check if cluster address exist
     match cluster_idx_option {
         Some(idx) => {
@@ -77,5 +80,42 @@ pub async fn select_cluster(
             session.write_response_header(Box::new(header), true).await.unwrap();
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod path_mod {
+    #[test]
+    fn path_test() {
+        // mock data
+        struct Prefix {
+            path: String,
+            index: usize,
+        }
+        let mut path_list = Vec::new();
+        let cluster1 = Prefix{
+            path: "/cluster1".to_string(),
+            index: 0
+        };
+        let cluster2 = Prefix{
+            path: "/cluster2".to_string(),
+            index: 1
+        };
+        path_list.push(cluster1);
+        path_list.push(cluster2);
+
+        // simulate origin
+        let mut original_uri = "/cluster1s/api";
+
+        // index can be used to select cluster metadata
+        let found_index = path_list
+            .iter()
+            .find_map(|prefix| {
+                if original_uri.starts_with(&prefix.path) {
+                    Some(&prefix.index) // Return the reference to the index
+                } else {
+                    None
+                }
+            });
     }
 }

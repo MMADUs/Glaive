@@ -19,6 +19,22 @@
 
 use serde::{Deserialize, Serialize};
 
+// the main limiter configuration
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Limiter {
+    global: Option<RatelimitType>,
+    client: Option<RatelimitType>,
+}
+
+impl Limiter {
+    pub fn get_global(&self) -> &Option<RatelimitType> {
+        &self.global
+    }
+    pub fn get_client(&self) -> &Option<RatelimitType> {
+        &self.client
+    }
+}
+
 // enum rate limit type
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]

@@ -37,7 +37,7 @@ pub struct ClusterConfig {
     // if the discovery config is provided, the upstream config will be ignored
     pub discovery: Option<discovery::DiscoveryType>,
     // the rate limit responsible for the maximum request to be limited
-    pub rate_limit: Option<limiter::RatelimitType>,
+    pub rate_limit: Option<limiter::Limiter>,
     // the used cache type
     pub cache: Option<cache::CacheType>,
     // the retry and timout mechanism is provided for connection failures
@@ -68,7 +68,7 @@ impl ClusterConfig {
     pub fn get_discovery(&self) -> &Option<discovery::DiscoveryType> {
         &self.discovery
     }
-    pub fn get_rate_limit(&self) -> &Option<limiter::RatelimitType> {
+    pub fn get_rate_limit(&self) -> &Option<limiter::Limiter> {
         &self.rate_limit
     }
     pub fn get_cache(&self) -> &Option<cache::CacheType> {
