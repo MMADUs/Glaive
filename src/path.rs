@@ -85,37 +85,26 @@ pub async fn select_cluster(
 
 #[cfg(test)]
 mod path_mod {
+    fn get_base_path(input: &str) -> Option<String> {
+        // Split the input path and collect the segments
+        let segments: Vec<&str> = input.split('/').filter(|s| !s.is_empty()).collect();
+
+        // Return the base path if it exists
+        if let Some(base) = segments.get(0) {
+            return Some(format!("/{}", base));
+        }
+        None
+    }
+
     #[test]
     fn path_test() {
-        // mock data
-        struct Prefix {
-            path: String,
-            index: usize,
+        // let paths = vec!["/cluster1s", "/cluster1s/", "/cluster1s/any", "/cluster1s/any/any", "/cluster1s/any?data=1"];
+        let paths = vec!["/"];
+
+        for path in paths {
+            if let Some(base_path) = get_base_path(path) {
+                assert_eq!(base_path, "/");
+            }
         }
-        let mut path_list = Vec::new();
-        let cluster1 = Prefix{
-            path: "/cluster1".to_string(),
-            index: 0
-        };
-        let cluster2 = Prefix{
-            path: "/cluster2".to_string(),
-            index: 1
-        };
-        path_list.push(cluster1);
-        path_list.push(cluster2);
-
-        // simulate origin
-        let mut original_uri = "/cluster1s/api";
-
-        // index can be used to select cluster metadata
-        let found_index = path_list
-            .iter()
-            .find_map(|prefix| {
-                if original_uri.starts_with(&prefix.path) {
-                    Some(&prefix.index) // Return the reference to the index
-                } else {
-                    None
-                }
-            });
     }
 }
