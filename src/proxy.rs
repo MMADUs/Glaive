@@ -103,6 +103,7 @@ impl ProxyHttp for ProxyRouter {
         }
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
+        println!("request belong to: {:?}", session.req_header().uri.path());
 
         // check if rate limiter is enabled
         if let Some(limiter) = cluster.get_rate_limit() {
