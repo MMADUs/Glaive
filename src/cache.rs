@@ -20,6 +20,7 @@
 use std::any::Any;
 use std::sync::Arc;
 use std::time::SystemTime;
+
 use pingora::cache::storage::{HandleHit, HandleMiss, HitHandler, MissHandler};
 use pingora::cache::key::{CacheHashKey, CacheKey, CompactCacheKey, HashBinary};
 use pingora::cache::trace::{Span, SpanHandle};

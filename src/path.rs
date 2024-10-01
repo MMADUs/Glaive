@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
 
+use serde::Serialize;
+
 use crate::proxy::RouterCtx;
 
 // used to determine which cluster is selected
@@ -33,19 +35,16 @@ pub async fn select_cluster(
 ) -> bool {
     // create a uri to be modified
     let mut modified_uri = original_uri.to_string();
-    println!("original uri: {}", original_uri);
 
     // validator for a valid http uri
     match original_uri.parse::<http::Uri>() {
-        Ok(valid_uri) => {
-            println!("this is a valid uri: {}", valid_uri);
-        }
-        Err(e) => {
-            println!("uri validation error: {}", e);
+        Ok(_) => (),
+        Err(_) => {
             // mark as bad request when http uri is not valid
+            println!("error is on first uri parse");
             let header = ResponseHeader::build(400, None).unwrap();
+            session.write_response_header(Box::new(header), false).await.unwrap();
             session.set_keepalive(None);
-            session.write_response_header(Box::new(header), true).await.unwrap();
             return true
         }
     }
@@ -53,18 +52,12 @@ pub async fn select_cluster(
     // manipulating uri string
     // Split the input path and collect the segments
     let segments: Vec<&str> = original_uri.split('/').filter(|s| !s.is_empty()).collect();
+    println!("segments: {:?}", segments);
     // get and format the result
     let serialized_uri = match segments.get(0) {
         Some(base) => format!("/{}", base),
-        None => {
-            // if format fails, mark as bad request
-            let header = ResponseHeader::build(400, None).unwrap();
-            session.set_keepalive(None);
-            session.write_response_header(Box::new(header), true).await.unwrap();
-            return false;
-        },
+        None => "/".to_string(),
     };
-    println!("serialized uri: {}", serialized_uri);
 
     // select the cluster address based on uri prefix
     let cluster_idx_option = prefix_map
@@ -79,7 +72,6 @@ pub async fn select_cluster(
             // return the cluster index
             idx
         });
-    println!("modified uri: {}", modified_uri);
 
     // check if cluster address exist
     match cluster_idx_option {
@@ -90,8 +82,8 @@ pub async fn select_cluster(
         None => {
             // if cluster does not exist, respond with 404
             let header = ResponseHeader::build(404, None).unwrap();
+            session.write_response_header(Box::new(header), false).await.unwrap();
             session.set_keepalive(None);
-            session.write_response_header(Box::new(header), true).await.unwrap();
             return true
         }
     }
@@ -106,15 +98,14 @@ pub async fn select_cluster(
     // parse the modified uri to a valid http uri
     match modified_uri.parse::<http::Uri>() {
         Ok(new_uri) => {
-            println!("new uri for upstream: {}", new_uri);
             session.req_header_mut().set_uri(new_uri);
             false
         }
-        Err(e) => {
-            println!("uri parse error: {}", e);
+        Err(_) => {
+            println!("error is on last uri parse");
             let header = ResponseHeader::build(400, None).unwrap();
+            session.write_response_header(Box::new(header), false).await.unwrap();
             session.set_keepalive(None);
-            session.write_response_header(Box::new(header), true).await.unwrap();
             true
         }
     }

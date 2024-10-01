@@ -29,10 +29,10 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    fn get_name(&self) -> String {
-        self.name.clone()
+    fn get_name(&self) -> &String {
+        &self.name
     }
-    fn get_acl(&self) -> Vec<String> {
-        self.acl.clone()
+    fn get_acl(&self) -> &Vec<String> {
+        &self.acl
     }
 }
