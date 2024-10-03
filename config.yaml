@@ -58,6 +58,11 @@ clusters:
         lock_timeout: 5000
     retry: 3
     timeout: 2000
+    auth:
+      key:
+        allowed:
+          - "secret"
+          - "key1"
     upstream:
       - "localhost:8000"
       - "localhost:8001"

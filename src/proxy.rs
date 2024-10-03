@@ -29,6 +29,7 @@ use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheab
 use async_trait::async_trait;
 
 use crate::cluster::ClusterMetadata;
+use crate::config::auth::AuthType;
 use crate::config::limiter::RatelimitType;
 use crate::config::consumer::Consumer;
 use crate::path::select_cluster;
@@ -134,11 +135,33 @@ impl ProxyHttp for ProxyRouter {
             }
         }
 
+        // cluster authentication
+        if let Some(auth_type) = cluster.get_auth() {
+            let req_header = session.req_header();
+            match auth_type {
+                AuthType::Key { key } => {
+                    if let Some(creds) = req_header.headers.get("Authorization").map(|v| v.as_bytes()) {
+                        if let Ok(creds_str) = std::str::from_utf8(creds) {
+                            match key.allowed.contains(&creds_str.to_string()) {
+                                true => {}
+                                false => return Err(PingoraError::new(ErrorType::HTTPStatus(403)))
+                            }
+                        } else {
+                            return Err(PingoraError::new(ErrorType::HTTPStatus(400)))
+                        }
+                    } else {
+                        return Err(PingoraError::new(ErrorType::HTTPStatus(403)))
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // check if routes are declared in config
         if let Some(routes) = cluster.get_routes() {
             // get current path
-            let cloned_new_header = session.req_header();
-            let path = cloned_new_header.uri.path();
+            let req_header = session.req_header();
+            let path = req_header.uri.path();
             // check if the current uri matches any of the listed routes
             let path_exist = routes
                 .iter()

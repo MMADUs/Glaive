@@ -30,7 +30,9 @@ pub enum AuthType {
 
 // key auth config
 #[derive(Debug, Deserialize, Serialize)]
-struct Key {}
+pub struct Key {
+    pub allowed: Vec<String>,
+}
 
 // jwt auth config
 #[derive(Debug, Deserialize, Serialize)]
