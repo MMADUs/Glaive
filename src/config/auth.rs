@@ -36,7 +36,9 @@ pub struct Key {
 
 // jwt auth config
 #[derive(Debug, Deserialize, Serialize)]
-struct Jwt {}
+pub struct Jwt {
+    pub secret: String,
+}
 
 // external auth config
 #[derive(Debug, Deserialize, Serialize)]

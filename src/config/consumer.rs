@@ -23,16 +23,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Consumer {
     // the allowed consumer name
-    name: String,
+    pub name: String,
     // the list of allowed access control
-    acl: Vec<String>,
+    pub acl: Vec<String>,
 }
 
 impl Consumer {
-    fn get_name(&self) -> &String {
+    pub fn get_name(&self) -> &String {
         &self.name
     }
-    fn get_acl(&self) -> &Vec<String> {
+    pub fn get_acl(&self) -> &Vec<String> {
         &self.acl
     }
 }

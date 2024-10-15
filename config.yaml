@@ -21,48 +21,43 @@ error_log: true
 #upstream_connect_offload_threadpools: 100
 #upstream_connect_offload_thread_per_pool: 100
 #upstream_debug_ssl_keylog: true
+
 clusters:
-#  - name: one
-#    host: "localhost"
-#    tls: false
-#    discovery:
-#      name: "test-service"
-#      passing: true
-#    prefix: "/one"
-#    rate_limit: 200
-#    retry: 3
-#    timeout: 2000
-#    upstream:
-#      - "localhost:3000"
-#      - "localhost:3001"
-  - name: two
+  - name: test-service
     host: "localhost"
     tls: false
 #    discovery:
 #      consul:
 #        name: "test-service"
 #        passing: true
-    rate_limit:
-      global:
-        basic:
-          limit: 100
-      client:
-        basic:
-          limit: 100
-    prefix: "/two"
-    cache:
-      memory:
-        cache_ttl: 10
-        max_size: 5
-        max_cache: 10
-        lock_timeout: 5000
-    retry: 3
-    timeout: 2000
+#    rate_limit:
+#      global:
+#        basic:
+#          limit: 100
+#      client:
+#        basic:
+#          limit: 100
+    prefix: "/service"
+#    cache:
+#      memory:
+#        cache_ttl: 10
+#        max_size: 5
+#        max_cache: 10
+#        lock_timeout: 5000
+#    retry: 3
+#    timeout: 2000
     auth:
-      key:
-        allowed:
-          - "secret"
-          - "key1"
+#      key:
+#        allowed:
+#          - "secret"
+#          - "key1"
+      jwt:
+        secret: "your-secret-key"
+    consumers:
+      - name: "users"
+        acl:
+          - "acl1"
+          - "acl2"
     upstream:
       - "localhost:8000"
       - "localhost:8001"
@@ -86,48 +81,18 @@ clusters:
             acl:
               - "view-product"
               - "view-order"
-      - name: "view-only-acl"
-        paths:
-          - "/pay"
-          - "/support"
-        methods:
-          - GET
-          - POST
-        headers:
-          insert:
-            - key: "header-key"
-              value: "header-value"
-          remove:
-            - key: "header-key"
-        consumers:
-          - name: "buyers"
-            acl:
-              - "view-product"
-              - "view-order"
-  - name: three
+
+  - name: auth
     host: "localhost"
     tls: false
-    prefix: "/three"
-    rate_limit:
-      basic:
-        limit: 100
-    retry: 3
-    timeout: 2000
+    prefix: "/jwt"
+#    rate_limit:
+#      basic:
+#        limit: 100
+#    retry: 3
+#    timeout: 2000
     upstream:
-      - "localhost:8000"
-      - "localhost:8001"
-  - name: four
-    host: "localhost"
-    tls: false
-    prefix: "/four"
-    rate_limit:
-      basic:
-        limit: 100
-    retry: 3
-    timeout: 2000
-    upstream:
-      - "localhost:8000"
-      - "localhost:8001"
+      - "localhost:8080"
 
 consumers:
   - name: "admin"
@@ -136,5 +101,5 @@ consumers:
       - "delete-product"
   - name: "user"
     acl:
-      - "view-product"
+      - "acl1"
       - "search-product"

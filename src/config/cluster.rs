@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{limiter, discovery, auth, route, cache};
+use crate::config::{limiter, discovery, auth, route, cache, consumer};
 
 // Raw individual cluster configuration
 #[derive(Debug, Deserialize)]
@@ -45,6 +45,8 @@ pub struct ClusterConfig {
     pub timeout: Option<u64>,
     // the global auth strategy for the service
     pub auth: Option<auth::AuthType>,
+    // the global consumers for the service
+    pub consumers: Option<Vec<consumer::Consumer>>,
     // the upstream is the hardcoded uri for proxy
     // note: the upstream will be ignored if you provide discovery in the configuration
     pub upstream: Option<Vec<String>>,
@@ -82,6 +84,9 @@ impl ClusterConfig {
     }
     pub fn get_auth(&self) -> &Option<auth::AuthType> {
         &self.auth
+    }
+    pub fn get_consumers(&self) -> &Option<Vec<consumer::Consumer>> {
+        &self.consumers
     }
     pub fn get_upstream(&self) -> &Option<Vec<String>> {
         &self.upstream
