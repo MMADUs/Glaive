@@ -98,6 +98,9 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/auth-test"
+    ip:
+      whitelist:
+        - "127.0.0.1"
     upstream:
       - "localhost:8000"
       - "localhost:8001"

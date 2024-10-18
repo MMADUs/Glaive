@@ -26,6 +26,15 @@ use serde::Serialize;
 
 use crate::proxy::RouterCtx;
 
+pub struct ResolverProvider {}
+
+impl ResolverProvider {
+    pub fn new() -> Self {
+        ResolverProvider {}
+    }
+    // to implement the rest
+}
+
 // used to determine which cluster is selected
 pub async fn select_cluster(
     prefix_map: &HashMap<String, usize>,

@@ -18,19 +18,22 @@
  */
 
 use crate::auth::AuthProvider;
+use crate::limiter::LimiterProvider;
+use crate::path::ResolverProvider;
 
+// the gateway is used for bootstrapping the entire gateway systems
 pub struct Gateway {
-    pub auth_provider: AuthProvider
+    pub auth_provider: AuthProvider,
+    pub limiter_provider: LimiterProvider,
+    pub resolver_provider: ResolverProvider
 }
 
 impl Gateway {
     pub fn new() -> Self {
         Gateway {
-            auth_provider: AuthProvider::new()
+            auth_provider: AuthProvider::new(),
+            limiter_provider: LimiterProvider::new(),
+            resolver_provider: ResolverProvider::new()
         }
-    }
-
-    pub fn get_auth_provider(&self) -> &AuthProvider {
-        &self.auth_provider
     }
 }

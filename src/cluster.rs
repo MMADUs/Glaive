@@ -25,11 +25,11 @@ use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
 
+use crate::discovery::{Discovery, DiscoveryBackgroundService};
 use crate::bucket::CacheBucket;
-use crate::config::auth::AuthType;
+use crate::config::auth::{AuthType, IpWhitelist};
 use crate::config::cache::CacheType;
 use crate::config::discovery::DiscoveryType;
-use crate::discovery::{Discovery, DiscoveryBackgroundService};
 use crate::config::cluster::ClusterConfig;
 use crate::config::consumer::Consumer;
 use crate::config::limiter::Limiter;
@@ -102,6 +102,7 @@ pub struct ClusterMetadata {
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
     pub auth: Option<AuthType>,
+    pub ip: Option<IpWhitelist>,
     pub consumers: Option<Vec<Consumer>>,
     pub routes: Option<Vec<Route>>,
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
@@ -134,6 +135,9 @@ impl ClusterMetadata {
     }
     pub fn get_auth(&self) -> &Option<AuthType> {
         &self.auth
+    }
+    pub fn get_ip(&self) -> &Option<IpWhitelist> {
+        &self.ip
     }
     pub fn get_consumers(&self) -> &Option<Vec<Consumer>> {
         &self.consumers
@@ -241,6 +245,7 @@ pub fn build_cluster(
             retry: cluster_conf.retry,
             timeout: cluster_conf.timeout,
             auth: cluster_conf.auth,
+            ip: cluster_conf.ip,
             consumers: cluster_conf.consumers,
             routes: cluster_conf.routes,
             upstream: cluster_service.task(),

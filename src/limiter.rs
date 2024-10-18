@@ -27,6 +27,15 @@ use once_cell::sync::Lazy;
 
 use crate::proxy::RouterCtx;
 
+pub struct LimiterProvider {}
+
+impl LimiterProvider {
+    pub fn new() -> Self {
+        LimiterProvider {}
+    }
+    // to implement the rest
+}
+
 // Global config limiter refresh duration
 // Value is 60 seconds by default
 static RATE_LIMITER: Lazy<Rate> = Lazy::new(|| Rate::new(Duration::from_secs(60)));

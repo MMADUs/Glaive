@@ -43,3 +43,9 @@ pub struct Jwt {
 // external auth config
 #[derive(Debug, Deserialize, Serialize)]
 struct External {}
+
+// ip whitelist
+#[derive(Debug, Deserialize, Serialize)]
+pub struct IpWhitelist {
+    pub whitelist: Vec<String>,
+}

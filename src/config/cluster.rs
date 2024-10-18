@@ -43,6 +43,8 @@ pub struct ClusterConfig {
     // the retry and timout mechanism is provided for connection failures
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
+    // enables ip restriction and whitelisted only
+    pub ip: Option<auth::IpWhitelist>,
     // the global auth strategy for the service
     pub auth: Option<auth::AuthType>,
     // the global consumers for the service

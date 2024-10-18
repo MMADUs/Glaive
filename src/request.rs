@@ -28,11 +28,11 @@ use http::{HeaderName};
 pub static HTTP_HEADER_X_FORWARDED_FOR: Lazy<HeaderName> = Lazy::new(|| HeaderName::from_str("X-Forwarded-For").unwrap());
 pub static HTTP_HEADER_X_REAL_IP: Lazy<HeaderName> = Lazy::new(|| HeaderName::from_str("X-Real-Ip").unwrap());
 
-pub struct RequestUtil {}
+pub struct RequestProvider {}
 
-impl RequestUtil {
+impl RequestProvider {
     pub fn new() -> Self {
-        RequestUtil {}
+        RequestProvider {}
     }
 
     pub fn get_remote_addr(
