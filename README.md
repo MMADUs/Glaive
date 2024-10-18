@@ -19,7 +19,7 @@ This is currently the plan for future key features to be implemented.
 - [x] YAML Configuration (DB-less Mode)
 - [ ] DB-Mode with MongoDB
 - [x] Dynamic Routing
-- [ ] Endpoint Configuration
+- [x] Endpoint Configuration
 - [x] Retry Mechanism
 - [x] Request Timeout
 - [ ] Redis Support
@@ -29,12 +29,12 @@ This is currently the plan for future key features to be implemented.
 - [ ] CORS Policy
 - [ ] Circuit Breaking
 - [ ] Request Size Limiter
-- [ ] Key Authentication
-- [ ] Basic Token Authentication
+- [x] Key Authentication
+- [x] Basic Token Authentication
 - [ ] Advanced Token Authentication
 - [ ] Built in external Authentication
-- [ ] Authorization
-- [ ] Consumer ACL
+- [x] Authorization
+- [x] Consumer ACL
 - [ ] IP Restriction
 - [ ] OAuth 2.0 Authentication
 - [x] Consul Discovery

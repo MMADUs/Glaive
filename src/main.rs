@@ -27,6 +27,8 @@ mod cache;
 mod bucket;
 mod default;
 mod config;
+mod request;
+mod gateway;
 
 use std::env;
 
@@ -41,6 +43,7 @@ use tracing_subscriber::fmt;
 use crate::cluster::build_cluster;
 use crate::config::config::load_config;
 use crate::default::DefaultProxy;
+use crate::gateway::Gateway;
 use crate::proxy::ProxyRouter;
 
 fn main() {
@@ -73,6 +76,8 @@ fn main() {
     // load configuration and merge to server configuration
     let gateway_configuration = load_config(&mut server.configuration);
     server.bootstrap(); // preparing
+    // Setup new gateway
+    let gateway_utils = Gateway::new();
 
     // checks the cluster configuration existence and build the cluster
     match gateway_configuration.clusters {
@@ -90,6 +95,7 @@ fn main() {
             }
             // build the proxy service and listen
             let proxy_router = ProxyRouter {
+                gateway: gateway_utils,
                 clusters: built_clusters.clusters,
                 prefix_map: built_clusters.prefix_map,
                 consumers: gateway_configuration.consumers,

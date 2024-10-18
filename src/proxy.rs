@@ -34,6 +34,7 @@ use crate::cluster::ClusterMetadata;
 use crate::config::auth::AuthType;
 use crate::config::limiter::RatelimitType;
 use crate::config::consumer::Consumer;
+use crate::gateway::Gateway;
 use crate::path::select_cluster;
 use crate::limiter::rate_limiter;
 
@@ -46,6 +47,7 @@ struct Claims {
 
 // Main Struct as Router to implement ProxyHttp
 pub struct ProxyRouter {
+    pub gateway: Gateway,
     pub clusters: Vec<ClusterMetadata>,
     pub prefix_map: HashMap<String, usize>,
     pub consumers: Option<Vec<Consumer>>,
@@ -146,115 +148,19 @@ impl ProxyHttp for ProxyRouter {
 
         // cluster authentication
         if let Some(auth_type) = cluster.get_auth() {
-            let req_header = session.req_header();
             match auth_type {
                 AuthType::Key { key } => {
-                    if let Some(creds) = req_header.headers.get("Authorization").map(|v| v.as_bytes()) {
-                        if let Ok(creds_str) = std::str::from_utf8(creds) {
-                            match key.allowed.contains(&creds_str.to_string()) {
-                                true => {}
-                                false => return Err(PingoraError::new(ErrorType::HTTPStatus(403)))
-                            }
-                        } else {
-                            return Err(PingoraError::new(ErrorType::HTTPStatus(400)))
-                        }
-                    } else {
-                        return Err(PingoraError::new(ErrorType::HTTPStatus(403)))
+                    let access = &self.gateway.auth_provider.basic_key(&key, session, ctx).await;
+                    match access {
+                        true => return Ok(true),
+                        false => (),
                     }
                 }
                 AuthType::JWT { jwt } => {
-                    if let Some(token) = req_header.headers.get("Authorization").map(|v| v.as_bytes()) {
-                        // parse token to str from utf8
-                        if let Ok(parsed_token) = std::str::from_utf8(token) {
-                            // remover the Bearer from the headers
-                            let cleaned_token = parsed_token.trim_start_matches("Bearer ").trim();
-                            // create the validator instance
-                            let validation = Validation::new(Algorithm::HS256);
-                            // get the payload as token_claim
-                            let token_claim = decode::<Claims>(
-                                cleaned_token,
-                                &DecodingKey::from_secret(jwt.secret.as_ref()),
-                                &validation
-                            );
-                            // checks if token is valid
-                            match token_claim {
-                                Ok(claim) => {
-                                    // get current time
-                                    let current_time = SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .expect("Time went backwards")
-                                        .as_secs() as usize;
-                                    // checks if token is expired
-                                    if claim.claims.exp <= current_time {
-                                        return Err(PingoraError::new(ErrorType::HTTPStatus(403)));
-                                    }
-                                    // the authentication ends here
-                                    // the rest the code below will be the authorization process based on the defined consumers
-                                    // get consumers if consumers is provided
-                                    // if no consumers is provided, auth layer ends here
-                                    if let Some(consumers) = cluster.get_consumers() {
-                                        // checks if the consumer from token is allowed by the defined service consumer
-                                        let (client_consumer_name, allowed_acl) = consumers
-                                            .iter()
-                                            .find(|consumer| {
-                                                // check if consumer token exist in the allowed list
-                                                let name = consumer.get_name();
-                                                claim.claims.consumer == *name
-                                            })
-                                            .map(|consumer| {
-                                                // if consumer exist in the allowed list
-                                                // return the allowed consumer name and acl
-                                                let name = consumer.get_name();
-                                                let allowed_acl = consumer.get_acl();
-                                                (name, allowed_acl)
-                                            }) // Get the ACL if found
-                                            .ok_or_else(|| return PingoraError::new(ErrorType::HTTPStatus(403)))?; // Return 403 if not found
-
-                                        // checks if the gateway consumer data is provided
-                                        if let Some(def_consumer) = &self.consumers {
-                                            // if its provided, trying to query the acl by consumer name that we got previously
-                                            let acl = def_consumer
-                                                .iter()
-                                                .find(|consumer| {
-                                                    // check if consumer exist in the consumer gateway
-                                                    let name = consumer.get_name();
-                                                    client_consumer_name == name
-                                                })
-                                                .map(|consumer| {
-                                                    // if consumer exist, return the acl from the consumer gateway
-                                                    let acl = consumer.get_acl();
-                                                    acl
-                                                })
-                                                .ok_or_else(|| return PingoraError::new(ErrorType::HTTPStatus(500)))?; // we should return 500, because we are using consumer, but they are not defined on the gateway
-
-                                            // checks if the acl we got from the consumer gateway config match the allowed acl in the service
-                                            let authorized = acl
-                                                .iter()
-                                                .any(|acl_item| {
-                                                    // check if exist
-                                                    allowed_acl.iter().any(|allowed_acl_item| {
-                                                        allowed_acl_item == acl_item
-                                                    })
-                                            });
-                                            // checks if the client is allowed by the acl
-                                            if !authorized {
-                                                return Err(PingoraError::new(ErrorType::HTTPStatus(403)));
-                                            } else {
-                                                println!("consumer is authorized");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("{:?}", e);
-                                    return Err(PingoraError::new(ErrorType::HTTPStatus(400)));
-                                }
-                            }
-                        } else {
-                            return Err(PingoraError::new(ErrorType::HTTPStatus(400)))
-                        }
-                    } else {
-                        return Err(PingoraError::new(ErrorType::HTTPStatus(403)))
+                    let access = &self.gateway.auth_provider.basic_jwt(&self, &cluster, &jwt, session, ctx).await;
+                    match access {
+                        true => return Ok(true),
+                        false => (),
                     }
                 }
                 _ => {}

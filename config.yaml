@@ -54,7 +54,7 @@ clusters:
       jwt:
         secret: "your-secret-key"
     consumers:
-      - name: "users"
+      - name: "user"
         acl:
           - "acl1"
           - "acl2"
@@ -93,6 +93,18 @@ clusters:
 #    timeout: 2000
     upstream:
       - "localhost:8080"
+
+  - name: test-auth
+    host: "localhost"
+    tls: false
+    prefix: "/auth-test"
+    upstream:
+      - "localhost:8000"
+      - "localhost:8001"
+    auth:
+      key:
+        allowed:
+          - "app-key"
 
 consumers:
   - name: "admin"
