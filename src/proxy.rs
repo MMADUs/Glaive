@@ -27,7 +27,6 @@ use pingora::http::{ResponseHeader};
 use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
 
 use async_trait::async_trait;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::ClusterMetadata;
@@ -35,8 +34,6 @@ use crate::config::auth::AuthType;
 use crate::config::limiter::RatelimitType;
 use crate::config::consumer::Consumer;
 use crate::gateway::Gateway;
-use crate::path::select_cluster;
-use crate::limiter::rate_limiter;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -55,9 +52,12 @@ pub struct ProxyRouter {
 
 // struct for proxy context
 pub struct RouterCtx {
+    pub cluster_identity: Option<String>,
     pub cluster_address: usize,
     pub proxy_retry: usize,
     pub uri_origin: Option<String>,
+    pub client_address: Option<String>,
+    pub client_credentials: Option<String>,
 }
 
 #[async_trait]
@@ -67,9 +67,12 @@ impl ProxyHttp for ProxyRouter {
 
     // initial ctx values
     fn new_ctx(&self) -> Self::CTX { RouterCtx {
+        cluster_identity: None,
         cluster_address: 0,
         proxy_retry: 0,
         uri_origin: None,
+        client_address: None,
+        client_credentials: None,
     }}
 
     // The upstream_peer phase executes after request_filter
@@ -108,13 +111,24 @@ impl ProxyHttp for ProxyRouter {
         ctx.uri_origin = Some(cloned_req_header.uri.to_string());
 
         // select the cluster based on prefix
-        let path_result = select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+        let path_result = &self.gateway.resolver_provider.select_cluster(&self.prefix_map, original_uri, session, ctx).await;
         match path_result {
             true => return Ok(true),
             false => (),
         }
         // Select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
+        // get cluster identity
+        ctx.cluster_identity = Some(cluster.get_name().clone());
+
+        // get client address as default identity
+        if let Some(address) = &self.gateway.request_provider.get_client_ip(session) {
+            ctx.client_address = Some(address.clone());
+        }
+        // get client credential as the primary identity
+        if let Some(credential) = &self.gateway.request_provider.get_req_header_value(session, "Authorization") {
+            ctx.client_credentials = Some(credential.to_string());
+        }
 
         // check if rate limiter is enabled
         if let Some(limiter) = cluster.get_rate_limit() {
@@ -123,7 +137,7 @@ impl ProxyHttp for ProxyRouter {
                 match global_limiter_type {
                     RatelimitType::Basic { basic} => {
                         // rate limit incoming request
-                        let limiter_result = rate_limiter(basic.limit, session, ctx).await;
+                        let limiter_result = &self.gateway.limiter_provider.global_limiter(basic.limit, session, ctx).await;
                         match limiter_result {
                             true => return Ok(true),
                             false => (),
@@ -136,7 +150,7 @@ impl ProxyHttp for ProxyRouter {
                 match client_limiter_type {
                     RatelimitType::Basic { basic } => {
                         // rate limit incoming request
-                        let limiter_result = rate_limiter(basic.limit, session, ctx).await;
+                        let limiter_result = &self.gateway.limiter_provider.client_limiter(basic.limit, session, ctx).await;
                         match limiter_result {
                             true => return Ok(true),
                             false => (),

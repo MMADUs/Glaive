@@ -98,16 +98,23 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/auth-test"
-    ip:
-      whitelist:
-        - "127.0.0.1"
+    rate_limit:
+      global:
+        basic:
+          limit: 10
+      client:
+        basic:
+          limit: 2
+#    ip:
+#      whitelist:
+#        - "127.0.0.1"
     upstream:
       - "localhost:8000"
       - "localhost:8001"
-    auth:
-      key:
-        allowed:
-          - "app-key"
+#    auth:
+#      key:
+#        allowed:
+#          - "app-key"
 
 consumers:
   - name: "admin"

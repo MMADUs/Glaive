@@ -31,11 +31,13 @@ pub static HTTP_HEADER_X_REAL_IP: Lazy<HeaderName> = Lazy::new(|| HeaderName::fr
 pub struct RequestProvider {}
 
 impl RequestProvider {
+    // new request provide instance
     pub fn new() -> Self {
         RequestProvider {}
     }
 
-    pub fn get_remote_addr(
+    // get client remote address
+    fn get_remote_addr(
         &self,
         session: &Session
     ) -> Option<(String, u16)> {
@@ -53,30 +55,37 @@ impl RequestProvider {
     pub fn get_client_ip(
         &self,
         session: &Session
-    ) -> String {
-        if let Some(value) = session.get_header(HTTP_HEADER_X_FORWARDED_FOR.clone())
-        {
-            let arr: Vec<&str> =
-                value.to_str().unwrap_or_default().split(',').collect();
+    ) -> Option<String> {
+        // Check X-Forwarded-For header
+        if let Some(value) = session.get_header(HTTP_HEADER_X_FORWARDED_FOR.clone()) {
+            let arr: Vec<&str> = value
+                .to_str()
+                .unwrap_or_default()
+                .split(", ")
+                .collect();
             if !arr.is_empty() {
-                return arr[0].trim().to_string();
+                return Some(arr[0].trim().to_string());
             }
         }
+        // Check X-Real-IP header
         if let Some(value) = session.get_header(HTTP_HEADER_X_REAL_IP.clone()) {
-            return value.to_str().unwrap_or_default().to_string();
+            return Some(value.to_str().unwrap_or_default().to_string());
         }
+        // Fallback to remote address
         if let Some((addr, _)) = &self.get_remote_addr(session) {
-            return addr.to_string();
+            return Some(addr.to_string());
         }
-        "".to_string()
+        // Return None if no IP was found
+        None
     }
 
     /// Gets string value from req header.
     pub fn get_req_header_value<'a>(
-        &self,
-        req_header: &'a RequestHeader,
+        &'a self,
+        session: &'a Session,
         key: &str,
     ) -> Option<&'a str> {
+        let req_header = session.req_header();
         if let Some(value) = req_header.headers.get(key) {
             if let Ok(value) = value.to_str() {
                 return Some(value);
@@ -87,14 +96,14 @@ impl RequestProvider {
 
     /// Gets cookie value from req header.
     pub fn get_cookie_value<'a>(
-        &self,
-        req_header: &'a RequestHeader,
+        &'a self,
+        session: &'a Session,
         cookie_name: &str,
     ) -> Option<&'a str> {
-        if let Some(cookie_value) = &self.get_req_header_value(req_header, "Cookie") {
+        if let Some(cookie_value) = &self.get_req_header_value(session, "Cookie") {
             for item in cookie_value.split(';') {
                 if let Some((k, v)) = item.split_once('=') {
-                    if k == cookie_name {
+                    if k.trim() == cookie_name {
                         return Some(v.trim());
                     }
                 }

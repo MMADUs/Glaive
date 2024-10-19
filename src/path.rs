@@ -32,90 +32,90 @@ impl ResolverProvider {
     pub fn new() -> Self {
         ResolverProvider {}
     }
-    // to implement the rest
-}
 
-// used to determine which cluster is selected
-pub async fn select_cluster(
-    prefix_map: &HashMap<String, usize>,
-    original_uri: &str,
-    session: &mut Session,
-    ctx: &mut RouterCtx,
-) -> bool {
-    // create a uri to be modified
-    let mut modified_uri = original_uri.to_string();
+    // used to determine which cluster is selected
+    pub async fn select_cluster(
+        &self,
+        prefix_map: &HashMap<String, usize>,
+        original_uri: &str,
+        session: &mut Session,
+        ctx: &mut RouterCtx,
+    ) -> bool {
+        // create a uri to be modified
+        let mut modified_uri = original_uri.to_string();
 
-    // validator for a valid http uri
-    match original_uri.parse::<http::Uri>() {
-        Ok(_) => (),
-        Err(_) => {
-            // mark as bad request when http uri is not valid
-            println!("error is on first uri parse");
-            let header = ResponseHeader::build(400, None).unwrap();
-            session.write_response_header(Box::new(header), false).await.unwrap();
-            session.set_keepalive(None);
-            return true
+        // validator for a valid http uri
+        match original_uri.parse::<http::Uri>() {
+            Ok(_) => (),
+            Err(_) => {
+                // mark as bad request when http uri is not valid
+                println!("error is on first uri parse");
+                let header = ResponseHeader::build(400, None).unwrap();
+                session.write_response_header(Box::new(header), false).await.unwrap();
+                session.set_keepalive(None);
+                return true
+            }
         }
-    }
 
-    // manipulating uri string
-    // Split the input path and collect the segments
-    let segments: Vec<&str> = original_uri.split('/').filter(|s| !s.is_empty()).collect();
-    println!("segments: {:?}", segments);
-    // get and format the result
-    let serialized_uri = match segments.get(0) {
-        Some(base) => format!("/{}", base),
-        None => "/".to_string(),
-    };
+        // manipulating uri string
+        // Split the input path and collect the segments
+        let segments: Vec<&str> = original_uri.split('/').filter(|s| !s.is_empty()).collect();
+        println!("segments: {:?}", segments);
+        // get and format the result
+        let serialized_uri = match segments.get(0) {
+            Some(base) => format!("/{}", base),
+            None => "/".to_string(),
+        };
 
-    // select the cluster address based on uri prefix
-    let cluster_idx_option = prefix_map
-        .iter()
-        .find(|(prefix, _)| {
-            // validate if the original uri matches the one from list
-            prefix.to_string() == serialized_uri
-        })
-        .map(|(prefix, &idx)| {
-            // modify by removing cluster prefix to be service uri
-            modified_uri = original_uri.replacen(prefix, "", 1);
-            // return the cluster index
-            idx
-        });
+        // select the cluster address based on uri prefix
+        let cluster_idx_option = prefix_map
+            .iter()
+            .find(|(prefix, _)| {
+                // validate if the original uri matches the one from list
+                prefix.to_string() == serialized_uri
+            })
+            .map(|(prefix, &idx)| {
+                // modify by removing cluster prefix to be service uri
+                modified_uri = original_uri.replacen(prefix, "", 1);
+                // return the cluster index
+                idx
+            });
 
-    // check if cluster address exist
-    match cluster_idx_option {
-        Some(idx) => {
-            // if exist modify cluster address to the selected address
-            ctx.cluster_address = idx;
+        // check if cluster address exist
+        match cluster_idx_option {
+            Some(idx) => {
+                // if exist modify cluster address to the selected address
+                ctx.cluster_address = idx;
+            }
+            None => {
+                // if cluster does not exist, respond with 404
+                let header = ResponseHeader::build(404, None).unwrap();
+                session.write_response_header(Box::new(header), false).await.unwrap();
+                session.set_keepalive(None);
+                return true
+            }
         }
-        None => {
-            // if cluster does not exist, respond with 404
-            let header = ResponseHeader::build(404, None).unwrap();
-            session.write_response_header(Box::new(header), false).await.unwrap();
-            session.set_keepalive(None);
-            return true
-        }
-    }
 
-    // checks for empty modified uri
-    if modified_uri.is_empty() {
-        // if modified uri is empty then just redirect to "/"
-        session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
-        return false
-    }
-
-    // parse the modified uri to a valid http uri
-    match modified_uri.parse::<http::Uri>() {
-        Ok(new_uri) => {
-            session.req_header_mut().set_uri(new_uri);
-            false
+        // checks for empty modified uri
+        if modified_uri.is_empty() {
+            // if modified uri is empty then just redirect to "/"
+            session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
+            return false
         }
-        Err(_) => {
-            println!("error is on last uri parse");
-            let header = ResponseHeader::build(400, None).unwrap();
-            session.write_response_header(Box::new(header), false).await.unwrap();
-            session.set_keepalive(None);
-            true
+
+        // parse the modified uri to a valid http uri
+        match modified_uri.parse::<http::Uri>() {
+            Ok(new_uri) => {
+                session.req_header_mut().set_uri(new_uri);
+                false
+            }
+            Err(_) => {
+                println!("error is on last uri parse");
+                let header = ResponseHeader::build(400, None).unwrap();
+                session.write_response_header(Box::new(header), false).await.unwrap();
+                session.set_keepalive(None);
+                true
+            }
         }
     }
 }

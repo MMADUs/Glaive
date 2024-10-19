@@ -18,14 +18,25 @@
  */
 
 use std::time::Duration;
-
+use bytes::Bytes;
 use pingora::prelude::Session;
 use pingora::http::ResponseHeader;
 use pingora_limits::rate::Rate;
 
 use once_cell::sync::Lazy;
-
+use serde::{Deserialize, Serialize};
 use crate::proxy::RouterCtx;
+
+// Global config limiter refresh duration
+// Value is 60 seconds by default
+static RATE_LIMITER: Lazy<Rate> = Lazy::new(|| Rate::new(Duration::from_secs(60)));
+
+// for rate limit exceed response body
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TooManyRequest {
+    pub status_code: usize,
+    pub message: String,
+}
 
 pub struct LimiterProvider {}
 
@@ -33,46 +44,83 @@ impl LimiterProvider {
     pub fn new() -> Self {
         LimiterProvider {}
     }
-    // to implement the rest
-}
 
-// Global config limiter refresh duration
-// Value is 60 seconds by default
-static RATE_LIMITER: Lazy<Rate> = Lazy::new(|| Rate::new(Duration::from_secs(60)));
-
-pub async fn rate_limiter(
-    max_req_limit: isize,
-    session: &mut Session,
-    _ctx: &mut RouterCtx,
-) -> bool {
-    // find the appid headers
-    let appid = match session
-        .req_header()
-        .headers
-        .get("appid")
-        .and_then(|header_value| header_value.to_str().ok())
-    {
-        Some(value) => value.to_string(),
-        None => {
-            let header = ResponseHeader::build(400, None).unwrap();
-            session.set_keepalive(None);
-            session.write_response_header(Box::new(header), true).await.unwrap();
-            return true
+    // global limiter for service/route level
+    // this uses service identity as hash
+    pub async fn global_limiter(
+        &self,
+        max_req_limit: isize,
+        session: &mut Session,
+        ctx: &mut RouterCtx,
+    ) -> bool {
+        // make sure cluster identity exist
+        if let Some(service_id) = &ctx.cluster_identity {
+            println!("service_id: {}", service_id);
+            // retrieve the current window requests
+            let curr_window_requests = RATE_LIMITER.observe(&service_id, 1);
+            // if rate limit exceed
+            if curr_window_requests > max_req_limit {
+                // rate limited, return 429
+                let mut header = ResponseHeader::build(429, None).unwrap();
+                header.insert_header("X-Rate-Limit-Limit", max_req_limit.to_string()).unwrap();
+                header.insert_header("X-Rate-Limit-Remaining", "0").unwrap();
+                header.insert_header("X-Rate-Limit-Reset", "1").unwrap();
+                let error = TooManyRequest {
+                    status_code: 429,
+                    message: "Too many requests.".to_string(),
+                };
+                let json_body = serde_json::to_string(&error).unwrap();
+                let body_bytes = Some(Bytes::from(json_body));
+                session.write_response_header(Box::new(header), false).await.unwrap();
+                session.write_response_body(body_bytes, true).await.unwrap();
+                session.set_keepalive(None);
+                return true;
+            }
+            // continue request
+            return false
         }
-    };
-
-    // retrieve the current window requests
-    let curr_window_requests = RATE_LIMITER.observe(&appid, 1);
-    // if rate limit exceed
-    if curr_window_requests > max_req_limit {
-        // rate limited, return 429
-        let mut header = ResponseHeader::build(429, None).unwrap();
-        header.insert_header("X-Rate-Limit-Limit", max_req_limit.to_string()).unwrap();
-        header.insert_header("X-Rate-Limit-Remaining", "0").unwrap();
-        header.insert_header("X-Rate-Limit-Reset", "1").unwrap();
-        session.set_keepalive(None);
-        session.write_response_header(Box::new(header), true).await.unwrap();
-        return true;
+        // todo here, either ignore or throw errors
+        false
     }
-    false
+
+    // client limiter for service/route level
+    // this uses client credential as hash
+    // used credential token as hash, but for public routes, uses ip by default
+    pub async fn client_limiter(
+        &self,
+        max_req_limit: isize,
+        session: &mut Session,
+        ctx: &mut RouterCtx,
+    ) -> bool {
+        // Get client credential or address
+        let client_credential = ctx.client_credentials.as_ref().or(ctx.client_address.as_ref());
+        // check if credential exist
+        if let Some(credential) = client_credential {
+            println!("client_credential: {:?}", credential);
+            // retrieve the current window requests
+            let curr_window_requests = RATE_LIMITER.observe(&credential, 1);
+            // if rate limit exceed
+            if curr_window_requests > max_req_limit {
+                // rate limited, return 429
+                let mut header = ResponseHeader::build(429, None).unwrap();
+                header.insert_header("X-Rate-Limit-Limit", max_req_limit.to_string()).unwrap();
+                header.insert_header("X-Rate-Limit-Remaining", "0").unwrap();
+                header.insert_header("X-Rate-Limit-Reset", "1").unwrap();
+                let error = TooManyRequest {
+                    status_code: 429,
+                    message: "Too many requests.".to_string(),
+                };
+                let json_body = serde_json::to_string(&error).unwrap();
+                let body_bytes = Some(Bytes::from(json_body));
+                session.write_response_header(Box::new(header), false).await.unwrap();
+                session.write_response_body(body_bytes, true).await.unwrap();
+                session.set_keepalive(None);
+                return true;
+            }
+            // continue request
+            return false
+        };
+        // todo here, either ignore or throw errors
+        false
+    }
 }
