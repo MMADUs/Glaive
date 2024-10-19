@@ -25,12 +25,17 @@ use pingora::proxy::Session;
 use serde::Serialize;
 
 use crate::proxy::RouterCtx;
+use crate::response::ResponseProvider;
 
-pub struct ResolverProvider {}
+pub struct ResolverProvider {
+    pub response_provider: ResponseProvider
+}
 
 impl ResolverProvider {
     pub fn new() -> Self {
-        ResolverProvider {}
+        ResolverProvider {
+            response_provider: ResponseProvider::new()
+        }
     }
 
     // used to determine which cluster is selected
@@ -49,10 +54,7 @@ impl ResolverProvider {
             Ok(_) => (),
             Err(_) => {
                 // mark as bad request when http uri is not valid
-                println!("error is on first uri parse");
-                let header = ResponseHeader::build(400, None).unwrap();
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.set_keepalive(None);
+                let _ = &self.response_provider.error_response(session, 400, "Invalid path", None).await;
                 return true
             }
         }
@@ -60,7 +62,6 @@ impl ResolverProvider {
         // manipulating uri string
         // Split the input path and collect the segments
         let segments: Vec<&str> = original_uri.split('/').filter(|s| !s.is_empty()).collect();
-        println!("segments: {:?}", segments);
         // get and format the result
         let serialized_uri = match segments.get(0) {
             Some(base) => format!("/{}", base),
@@ -89,9 +90,7 @@ impl ResolverProvider {
             }
             None => {
                 // if cluster does not exist, respond with 404
-                let header = ResponseHeader::build(404, None).unwrap();
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.set_keepalive(None);
+                let _ = &self.response_provider.error_response(session, 404, "Path does not exist", None).await;
                 return true
             }
         }
@@ -110,10 +109,7 @@ impl ResolverProvider {
                 false
             }
             Err(_) => {
-                println!("error is on last uri parse");
-                let header = ResponseHeader::build(400, None).unwrap();
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.set_keepalive(None);
+                let _ = &self.response_provider.error_response(session, 400, "Invalid path result", None).await;
                 true
             }
         }

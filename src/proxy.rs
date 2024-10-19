@@ -124,6 +124,14 @@ impl ProxyHttp for ProxyRouter {
         // get client address as default identity
         if let Some(address) = &self.gateway.request_provider.get_client_ip(session) {
             ctx.client_address = Some(address.clone());
+            // check if ip restriction is enabled
+            if let Some(ip) = &cluster.get_ip() {
+                let allowed = ip.whitelist.iter().any(|allowed_ip| allowed_ip == address);
+                if !allowed {
+                    let _ = &self.gateway.response_provider.error_response(session, 403, "restricted ip address", None).await;
+                    return Ok(true);
+                }
+            }
         }
         // get client credential as the primary identity
         if let Some(credential) = &self.gateway.request_provider.get_req_header_value(session, "Authorization") {
@@ -184,8 +192,7 @@ impl ProxyHttp for ProxyRouter {
         // check if routes are declared in config
         if let Some(routes) = cluster.get_routes() {
             // get current path
-            let req_header = session.req_header();
-            let path = req_header.uri.path();
+            let path = session.req_header().uri.path();
             // check if the current uri matches any of the listed routes
             let path_exist = routes
                 .iter()

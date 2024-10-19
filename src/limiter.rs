@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 /**
  * Copyright (c) 2024-2025 Glaive, Inc.
  *
@@ -26,6 +27,7 @@ use pingora_limits::rate::Rate;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use crate::proxy::RouterCtx;
+use crate::response::ResponseProvider;
 
 // Global config limiter refresh duration
 // Value is 60 seconds by default
@@ -38,11 +40,15 @@ pub struct TooManyRequest {
     pub message: String,
 }
 
-pub struct LimiterProvider {}
+pub struct LimiterProvider {
+    response_provider: ResponseProvider,
+}
 
 impl LimiterProvider {
     pub fn new() -> Self {
-        LimiterProvider {}
+        LimiterProvider {
+            response_provider: ResponseProvider::new(),
+        }
     }
 
     // global limiter for service/route level
@@ -60,20 +66,13 @@ impl LimiterProvider {
             let curr_window_requests = RATE_LIMITER.observe(&service_id, 1);
             // if rate limit exceed
             if curr_window_requests > max_req_limit {
+                let limit_str = max_req_limit.to_string();
                 // rate limited, return 429
-                let mut header = ResponseHeader::build(429, None).unwrap();
-                header.insert_header("X-Rate-Limit-Limit", max_req_limit.to_string()).unwrap();
-                header.insert_header("X-Rate-Limit-Remaining", "0").unwrap();
-                header.insert_header("X-Rate-Limit-Reset", "1").unwrap();
-                let error = TooManyRequest {
-                    status_code: 429,
-                    message: "Too many requests.".to_string(),
-                };
-                let json_body = serde_json::to_string(&error).unwrap();
-                let body_bytes = Some(Bytes::from(json_body));
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.write_response_body(body_bytes, true).await.unwrap();
-                session.set_keepalive(None);
+                let mut headers: HashMap<&str, &str> = HashMap::new();
+                headers.insert("X-Rate-Limit-Limit", limit_str.as_str());
+                headers.insert("X-Rate-Limit-Remaining", "0");
+                headers.insert("X-Rate-Limit-Reset", "1");
+                let _ = &self.response_provider.error_response(session, 429, "Too many request", Some(headers)).await;
                 return true;
             }
             // continue request
@@ -96,25 +95,17 @@ impl LimiterProvider {
         let client_credential = ctx.client_credentials.as_ref().or(ctx.client_address.as_ref());
         // check if credential exist
         if let Some(credential) = client_credential {
-            println!("client_credential: {:?}", credential);
             // retrieve the current window requests
             let curr_window_requests = RATE_LIMITER.observe(&credential, 1);
             // if rate limit exceed
             if curr_window_requests > max_req_limit {
+                let limit_str = max_req_limit.to_string();
                 // rate limited, return 429
-                let mut header = ResponseHeader::build(429, None).unwrap();
-                header.insert_header("X-Rate-Limit-Limit", max_req_limit.to_string()).unwrap();
-                header.insert_header("X-Rate-Limit-Remaining", "0").unwrap();
-                header.insert_header("X-Rate-Limit-Reset", "1").unwrap();
-                let error = TooManyRequest {
-                    status_code: 429,
-                    message: "Too many requests.".to_string(),
-                };
-                let json_body = serde_json::to_string(&error).unwrap();
-                let body_bytes = Some(Bytes::from(json_body));
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.write_response_body(body_bytes, true).await.unwrap();
-                session.set_keepalive(None);
+                let mut headers: HashMap<&str, &str> = HashMap::new();
+                headers.insert("X-Rate-Limit-Limit", limit_str.as_str());
+                headers.insert("X-Rate-Limit-Remaining", "0");
+                headers.insert("X-Rate-Limit-Reset", "1");
+                let _ = &self.response_provider.error_response(session, 429, "Too many request", Some(headers)).await;
                 return true;
             }
             // continue request

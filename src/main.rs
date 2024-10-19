@@ -29,6 +29,7 @@ mod default;
 mod config;
 mod request;
 mod gateway;
+mod response;
 
 use std::env;
 

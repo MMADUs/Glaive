@@ -17,16 +17,15 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use pingora::http::{ResponseHeader};
 use pingora::prelude::Session;
 
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
-use bytes::Bytes;
 
 use crate::cluster::ClusterMetadata;
 use crate::config::auth::{Jwt, Key};
 use crate::proxy::{ProxyRouter, RouterCtx};
+use crate::response::ResponseProvider;
 
 // claim for jsonwebtoken
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,12 +41,16 @@ struct Forbidden {
     message: String,
 }
 
-pub struct AuthProvider {}
+pub struct AuthProvider {
+    response_provider: ResponseProvider,
+}
 
 impl AuthProvider {
     // get auth provider
     pub fn new() -> Self {
-        AuthProvider {}
+        AuthProvider {
+            response_provider: ResponseProvider::new(),
+        }
     }
 
     // basic key auth
@@ -69,48 +72,18 @@ impl AuthProvider {
                     true => false, // if key are contained, continue request
                     false => {
                         // return 403 because key is not provided/allowed
-                        let mut header = ResponseHeader::build(403, None).unwrap();
-                        header.insert_header("Content-Type", "application/json").unwrap();
-                        let error = Forbidden {
-                            status_code: 403,
-                            message: "Invalid API Key".to_string(),
-                        };
-                        let json_body = serde_json::to_string(&error).unwrap();
-                        let body_bytes = Some(Bytes::from(json_body));
-                        session.write_response_header(Box::new(header), false).await.unwrap();
-                        session.write_response_body(body_bytes, true).await.unwrap();
-                        session.set_keepalive(None);
+                        let _ = &self.response_provider.error_response(session, 403, "Invalid API Key", None).await;
                         true
                     }
                 }
             } else {
-                // return 500, because this error happen during string parse
-                let mut header = ResponseHeader::build(500, None).unwrap();
-                header.insert_header("Content-Type", "application/json").unwrap();
-                let error = Forbidden {
-                    status_code: 500,
-                    message: "Unable to parse auth credential".to_string(),
-                };
-                let json_body = serde_json::to_string(&error).unwrap();
-                let body_bytes = Some(Bytes::from(json_body));
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.write_response_body(body_bytes, true).await.unwrap();
-                session.set_keepalive(None);
+                // return 502, because this error happen during string parse
+                let _ = &self.response_provider.error_response(session, 502, "Unable to parse key", None).await;
                 true
             }
         } else {
             // return 403 because key does not exist in request
-            let mut header = ResponseHeader::build(403, None).unwrap();
-            header.insert_header("Content-Type", "application/json").unwrap();
-            let error = Forbidden {
-                status_code: 403,
-                message: "Auth credential is required".to_string(),
-            };
-            let json_body = serde_json::to_string(&error).unwrap();
-            let body_bytes = Some(Bytes::from(json_body));
-            session.write_response_header(Box::new(header), false).await.unwrap();
-            session.write_response_body(body_bytes, true).await.unwrap();
-            session.set_keepalive(None);
+            let _ = &self.response_provider.error_response(session, 403, "Key is required", None).await;
             true
         }
     }
@@ -158,17 +131,7 @@ impl AuthProvider {
                                 (consumer.get_name(), consumer.get_acl())
                             } else {
                                 // If the consumer is not found, return a 403 response
-                                let mut header = ResponseHeader::build(403, None).unwrap();
-                                header.insert_header("Content-Type", "application/json").unwrap();
-                                let error = Forbidden {
-                                    status_code: 403,
-                                    message: "Unauthorized consumer".to_string(),
-                                };
-                                let json_body = serde_json::to_string(&error).unwrap();
-                                let body_bytes = Some(Bytes::from(json_body));
-                                session.write_response_header(Box::new(header), false).await.unwrap();
-                                session.write_response_body(body_bytes, true).await.unwrap();
-                                session.set_keepalive(None);
+                                let _ = &self.response_provider.error_response(session, 403, "Unauthorized consumer", None).await;
                                 return true; // Indicate that the error response was handled
                             };
 
@@ -187,17 +150,7 @@ impl AuthProvider {
                                     consumer.get_acl()
                                 } else {
                                     // If the consumer is not found, return 502 and stop execution
-                                    let mut header = ResponseHeader::build(502, None).unwrap();
-                                    header.insert_header("Content-Type", "application/json").unwrap();
-                                    let error = Forbidden {
-                                        status_code: 502,
-                                        message: "Consumer not found".to_string(),
-                                    };
-                                    let json_body = serde_json::to_string(&error).unwrap();
-                                    let body_bytes = Some(Bytes::from(json_body));
-                                    session.write_response_header(Box::new(header), false).await.unwrap();
-                                    session.write_response_body(body_bytes, true).await.unwrap();
-                                    session.set_keepalive(None);
+                                    let _ = &self.response_provider.error_response(session, 502, "Consumer not found", None).await;
                                     return true;
                                 }; // we should return 502, because we are using consumer, but they are not defined on the gateway
 
@@ -212,17 +165,7 @@ impl AuthProvider {
                                     });
                                 // checks if the client is allowed by the acl
                                 if !authorized {
-                                    let mut header = ResponseHeader::build(403, None).unwrap();
-                                    header.insert_header("Content-Type", "application/json").unwrap();
-                                    let error = Forbidden {
-                                        status_code: 403,
-                                        message: "Unauthorized access control".to_string(),
-                                    };
-                                    let json_body = serde_json::to_string(&error).unwrap();
-                                    let body_bytes = Some(Bytes::from(json_body));
-                                    session.write_response_header(Box::new(header), false).await.unwrap();
-                                    session.write_response_body(body_bytes, true).await.unwrap();
-                                    session.set_keepalive(None);
+                                    let _ = &self.response_provider.error_response(session, 403, "Unauthorized access control", None).await;
                                     true
                                 } else {
                                     // when client is authorized, continue the request
@@ -231,17 +174,7 @@ impl AuthProvider {
                                 }
                             } else {
                                 // return 502 because consumers is not defined in the gateway config
-                                let mut header = ResponseHeader::build(502, None).unwrap();
-                                header.insert_header("Content-Type", "application/json").unwrap();
-                                let error = Forbidden {
-                                    status_code: 502,
-                                    message: "Undefined consumer".to_string(),
-                                };
-                                let json_body = serde_json::to_string(&error).unwrap();
-                                let body_bytes = Some(Bytes::from(json_body));
-                                session.write_response_header(Box::new(header), false).await.unwrap();
-                                session.write_response_body(body_bytes, true).await.unwrap();
-                                session.set_keepalive(None);
+                                let _ = &self.response_provider.error_response(session, 502, "Undefined consumer", None).await;
                                 true
                             }
                         } else {
@@ -251,48 +184,19 @@ impl AuthProvider {
                     }
                     Err(error) => {
                         // return 403 due to invalid token
-                        let mut header = ResponseHeader::build(403, None).unwrap();
-                        header.insert_header("Content-Type", "application/json").unwrap();
-                        let error = Forbidden {
-                            status_code: 400,
-                            message: format!("Invalid Token: {}", error)
-                        };
-                        let json_body = serde_json::to_string(&error).unwrap();
-                        let body_bytes = Some(Bytes::from(json_body));
-                        session.write_response_header(Box::new(header), false).await.unwrap();
-                        session.write_response_body(body_bytes, true).await.unwrap();
-                        session.set_keepalive(None);
+                        let message = format!("Invalid Token: {}", error);
+                        let _ = &self.response_provider.error_response(session, 403, message.as_str(), None).await;
                         true
                     }
                 }
             } else {
                 // return 400 due to header parse error
-                let mut header = ResponseHeader::build(400, None).unwrap();
-                header.insert_header("Content-Type", "application/json").unwrap();
-                let error = Forbidden {
-                    status_code: 400,
-                    message: "Unable to parse token".to_string(),
-                };
-                let json_body = serde_json::to_string(&error).unwrap();
-                let body_bytes = Some(Bytes::from(json_body));
-                session.write_response_header(Box::new(header), false).await.unwrap();
-                session.write_response_body(body_bytes, true).await.unwrap();
-                session.set_keepalive(None);
+                let _ = &self.response_provider.error_response(session, 400, "Unable to parse token", None).await;
                 true
             }
         } else {
             // return 403 due to bearer does not exist in headers
-            let mut header = ResponseHeader::build(403, None).unwrap();
-            header.insert_header("Content-Type", "application/json").unwrap();
-            let error = Forbidden {
-                status_code: 403,
-                message: "Authentication token is required".to_string(),
-            };
-            let json_body = serde_json::to_string(&error).unwrap();
-            let body_bytes = Some(Bytes::from(json_body));
-            session.write_response_header(Box::new(header), false).await.unwrap();
-            session.write_response_body(body_bytes, true).await.unwrap();
-            session.set_keepalive(None);
+            let _ = &self.response_provider.error_response(session, 403, "Token is required", None).await;
             true
         }
     }
