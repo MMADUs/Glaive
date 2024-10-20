@@ -29,7 +29,7 @@ pub struct Gateway {
     pub limiter_provider: LimiterProvider,
     pub resolver_provider: ResolverProvider,
     pub request_provider: RequestProvider,
-    pub response_provider: ResponseProvider
+    pub response_provider: ResponseProvider,
 }
 
 impl Gateway {

@@ -28,13 +28,13 @@ use crate::proxy::RouterCtx;
 use crate::response::ResponseProvider;
 
 pub struct ResolverProvider {
-    pub response_provider: ResponseProvider
+    pub response_provider: ResponseProvider,
 }
 
 impl ResolverProvider {
     pub fn new() -> Self {
         ResolverProvider {
-            response_provider: ResponseProvider::new()
+            response_provider: ResponseProvider::new(),
         }
     }
 
@@ -54,8 +54,11 @@ impl ResolverProvider {
             Ok(_) => (),
             Err(_) => {
                 // mark as bad request when http uri is not valid
-                let _ = &self.response_provider.error_response(session, 400, "Invalid path", None).await;
-                return true
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 400, "Invalid path", None)
+                    .await;
+                return true;
             }
         }
 
@@ -90,16 +93,21 @@ impl ResolverProvider {
             }
             None => {
                 // if cluster does not exist, respond with 404
-                let _ = &self.response_provider.error_response(session, 404, "Path does not exist", None).await;
-                return true
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 404, "Path does not exist", None)
+                    .await;
+                return true;
             }
         }
 
         // checks for empty modified uri
         if modified_uri.is_empty() {
             // if modified uri is empty then just redirect to "/"
-            session.req_header_mut().set_uri("/".parse::<http::Uri>().unwrap());
-            return false
+            session
+                .req_header_mut()
+                .set_uri("/".parse::<http::Uri>().unwrap());
+            return false;
         }
 
         // parse the modified uri to a valid http uri
@@ -109,7 +117,10 @@ impl ResolverProvider {
                 false
             }
             Err(_) => {
-                let _ = &self.response_provider.error_response(session, 400, "Invalid path result", None).await;
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 400, "Invalid path result", None)
+                    .await;
                 true
             }
         }

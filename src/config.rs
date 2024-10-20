@@ -84,7 +84,7 @@ struct SystemConfig {
     /// Note: this is an _unstable_ field that may be renamed or removed in the future.
     pub upstream_debug_ssl_keylog: Option<bool>,
     /// anything below here will be used as gateway declaration config
-    /// 
+    ///
     /// Upper stream Cluster Configurations
     pub clusters: Option<Vec<ClusterConfig>>,
     /// Consumers list, this act something as database for the acl
@@ -226,9 +226,7 @@ pub struct GatewayConfig {
 }
 
 // load config from yaml and merge to server configuration
-pub fn load_config(
-    server_config: &mut Arc<ServerConf>,
-) -> GatewayConfig {
+pub fn load_config(server_config: &mut Arc<ServerConf>) -> GatewayConfig {
     // load and parse the yaml file as configuration
     // TODO: the file path should be configurable soon.
     let config = load_yaml("config.yaml");
@@ -280,7 +278,8 @@ pub fn load_config(
     }
     // graceful shutdown
     if let Some(graceful_shutdown_timeout_seconds) = config.graceful_shutdown_timeout_seconds {
-        server_config.graceful_shutdown_timeout_seconds = Some(graceful_shutdown_timeout_seconds.clone());
+        server_config.graceful_shutdown_timeout_seconds =
+            Some(graceful_shutdown_timeout_seconds.clone());
     }
     // client bind ipv4
     if let Some(client_bind_to_ipv4) = config.client_bind_to_ipv4 {
@@ -295,12 +294,17 @@ pub fn load_config(
         server_config.upstream_keepalive_pool_size = upstream_keepalive_pool_size.clone();
     }
     // upstream connect threadpools
-    if let Some(upstream_connect_offload_threadpools) = config.upstream_connect_offload_threadpools {
-        server_config.upstream_connect_offload_threadpools = Some(upstream_connect_offload_threadpools.clone());
+    if let Some(upstream_connect_offload_threadpools) = config.upstream_connect_offload_threadpools
+    {
+        server_config.upstream_connect_offload_threadpools =
+            Some(upstream_connect_offload_threadpools.clone());
     }
     // upstream connect thread per pool
-    if let Some(upstream_connect_offload_thread_per_pool) = config.upstream_connect_offload_thread_per_pool {
-        server_config.upstream_connect_offload_thread_per_pool = Some(upstream_connect_offload_thread_per_pool.clone());
+    if let Some(upstream_connect_offload_thread_per_pool) =
+        config.upstream_connect_offload_thread_per_pool
+    {
+        server_config.upstream_connect_offload_thread_per_pool =
+            Some(upstream_connect_offload_thread_per_pool.clone());
     }
     // debug ssl keylog
     if let Some(upstream_debug_ssl_keylog) = config.upstream_debug_ssl_keylog {

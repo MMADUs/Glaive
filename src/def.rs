@@ -54,13 +54,11 @@ impl ConsulType {
     pub fn build_cluster(
         &self,
         discovery: &Discovery,
-        updater_bg_process: &mut Vec<GenBackgroundService<DiscoveryBackgroundService>>
+        updater_bg_process: &mut Vec<GenBackgroundService<DiscoveryBackgroundService>>,
     ) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
         // Build the cluster with discovery
-        let (cluster, updater) = discovery.build_cluster_discovery(
-            self.name.clone(),
-            self.passing.clone(),
-        );
+        let (cluster, updater) =
+            discovery.build_cluster_discovery(self.name.clone(), self.passing.clone());
         updater_bg_process.push(updater);
         cluster
     }
@@ -123,18 +121,20 @@ pub struct MemoryCache {
 }
 
 impl MemoryCache {
-    pub fn new_storage(&self) -> (
-        Option<CacheBucket>,
-        Option<usize>,
-    ) {
+    pub fn new_storage(&self) -> (Option<CacheBucket>, Option<usize>) {
         let mega_byte: usize = 1024 * 1024;
         let bucket = CacheBucket::new(
             MemoryStorage::with_capacity(8192)
                 .with_reject_empty_body(true)
                 .with_max_file_size(Some(mega_byte * self.max_size)),
         )
-            .with_eviction(LRUEvictionManager::<16>::with_capacity(mega_byte * self.max_cache, 8192))
-            .with_cache_lock(CacheLock::new(Duration::from_millis(self.lock_timeout as u64)));
+        .with_eviction(LRUEvictionManager::<16>::with_capacity(
+            mega_byte * self.max_cache,
+            8192,
+        ))
+        .with_cache_lock(CacheLock::new(Duration::from_millis(
+            self.lock_timeout as u64,
+        )));
         // return bucket and ttl
         (Some(bucket), Some(self.cache_ttl))
     }

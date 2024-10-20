@@ -18,20 +18,23 @@
  */
 
 use std::time::Duration;
-use std::net::{Ipv4Addr, SocketAddr as StdSocketAddr, SocketAddrV4};
 use std::collections::{BTreeSet, HashMap};
+use std::net::{Ipv4Addr, SocketAddr as StdSocketAddr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use pingora::lb::{Backend, Backends, LoadBalancer};
 use pingora::lb::discovery::ServiceDiscovery;
-use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck, Result as PingoraResult};
-use pingora::services::background::{BackgroundService, GenBackgroundService};
+use pingora::lb::{Backend, Backends, LoadBalancer};
+use pingora::prelude::{background_service, Result as PingoraResult, RoundRobin, TcpHealthCheck};
 use pingora::protocols::l4::socket::SocketAddr as PingoraSocketAddr;
 use pingora::server::ShutdownWatch;
+use pingora::services::background::{BackgroundService, GenBackgroundService};
 
 use async_trait::async_trait;
-use rs_consul::{Consul, Config, GetServiceNodesRequest, ResponseMeta, RegisterEntityPayload, RegisterEntityService, RegisterEntityCheck};
+use rs_consul::{
+    Config, Consul, GetServiceNodesRequest, RegisterEntityCheck, RegisterEntityPayload,
+    RegisterEntityService, ResponseMeta,
+};
 
 // consul connection test
 #[tokio::test]
@@ -67,7 +70,9 @@ impl Discovery {
         println!("consul address: {:?}", &config.address);
         println!("consul token: {:?}", &config.token);
         let client = Consul::new(config);
-        Discovery { consul: Arc::new(client) }
+        Discovery {
+            consul: Arc::new(client),
+        }
     }
 
     // build the cluster with discovery configuration
@@ -83,7 +88,7 @@ impl Discovery {
         let consul_discovery = ConsulServiceDiscovery::new(Arc::clone(&self.consul), service_name, passing);
         // use the discovery as the backends, because it returns the backends
         let consul_backends = Backends::new(Box::new(consul_discovery));
-        let mut consul_upstream: LoadBalancer<RoundRobin> = LoadBalancer::from_backends(consul_backends);
+        let mut consul_upstream: LoadBalancer<RoundRobin> =LoadBalancer::from_backends(consul_backends);
         // health check the discovered backends
         // frequency is set to every 1 second by default
         let hc = TcpHealthCheck::new();
@@ -114,16 +119,16 @@ pub struct ConsulServiceDiscovery {
 // utilities for the main discovering logistics
 impl ConsulServiceDiscovery {
     // new service discovery instances
-    fn new(
-        consul: Arc<Consul>, 
-        service_name: String,
-        passing: bool,
-    ) -> ConsulServiceDiscovery {
-        ConsulServiceDiscovery { consul, service_name, passing }
+    fn new(consul: Arc<Consul>, service_name: String, passing: bool) -> ConsulServiceDiscovery {
+        ConsulServiceDiscovery {
+            consul,
+            service_name,
+            passing,
+        }
     }
 
     // the main utilities to discover and returning the backends
-    async fn discover_backends(&self) ->  PingoraResult<Vec<Backend>> {
+    async fn discover_backends(&self) -> PingoraResult<Vec<Backend>> {
         let gateway_service = RegisterEntityService {
             ID: None,
             Service: "Glaive-Gateway".to_string(),
@@ -145,7 +150,10 @@ impl ConsulServiceDiscovery {
             SkipNodeUpdate: None,
         };
         // register gateway to consul
-        self.consul.register_entity(&register_payload).await.expect("Failed to connect to consul");
+        self.consul
+            .register_entity(&register_payload)
+            .await
+            .expect("Failed to connect to consul");
         // discovery request
         let discover_req = GetServiceNodesRequest {
             service: &*self.service_name,
@@ -153,7 +161,11 @@ impl ConsulServiceDiscovery {
             ..Default::default()
         };
         // get services nodes
-        let ResponseMeta { response, .. } = self.consul.get_service_nodes(discover_req, None).await.unwrap();
+        let ResponseMeta { response, .. } = self
+            .consul
+            .get_service_nodes(discover_req, None)
+            .await
+            .unwrap();
         // extracting raw response to address
         let addresses: Vec<(String, u16)> = response
             .iter()
@@ -171,7 +183,8 @@ impl ConsulServiceDiscovery {
                     // checks if the address is localhost.
                     "localhost" => Ipv4Addr::new(127, 0, 0, 1),
                     // parse str address to ipv4
-                    address => Ipv4Addr::from_str(address).expect("Failed to parse discovery address, to ipv4 address.")
+                    address => Ipv4Addr::from_str(address)
+                        .expect("Failed to parse discovery address, to ipv4 address."),
                 };
                 println!("backend ip address: {:?} on port: {:?}", &ip, &port);
                 // build to std address, then build them to proxy address
@@ -230,4 +243,3 @@ impl BackgroundService for DiscoveryBackgroundService {
         }
     }
 }
-

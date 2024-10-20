@@ -17,19 +17,19 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-mod cluster;
-mod path;
-mod proxy;
-mod limiter;
 mod auth;
-mod discovery;
-mod cache;
 mod bucket;
-mod default;
+mod cache;
+mod cluster;
 mod config;
 mod def;
-mod request;
+mod default;
+mod discovery;
 mod gateway;
+mod limiter;
+mod path;
+mod proxy;
+mod request;
 mod response;
 
 use std::env;
@@ -88,11 +88,13 @@ fn main() {
             // the built cluster will return the main proxy router and the necessary background processing
             let built_clusters = build_cluster(cluster_config);
             // added every cluster background process to server
-            for (_idx, cluster_service) in built_clusters.cluster_bg_service.into_iter().enumerate() {
+            for (_idx, cluster_service) in built_clusters.cluster_bg_service.into_iter().enumerate()
+            {
                 server.add_service(cluster_service);
             }
             // added every updater background process to server
-            for (_idx, updater_process) in built_clusters.updater_bg_service.into_iter().enumerate() {
+            for (_idx, updater_process) in built_clusters.updater_bg_service.into_iter().enumerate()
+            {
                 server.add_service(updater_process);
             }
             // build the proxy service and listen
@@ -105,10 +107,10 @@ fn main() {
             let mut router = http_proxy_service(&server.configuration, proxy_router);
             router.add_tcp(address);
             server.add_service(router);
-        },
+        }
         None => {
             // this is the default proxy trait that runs when configuration does not exist
-            let mut default = http_proxy_service(&server.configuration, DefaultProxy{});
+            let mut default = http_proxy_service(&server.configuration, DefaultProxy {});
             default.add_tcp(address);
             server.add_service(default);
         }

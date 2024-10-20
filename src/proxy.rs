@@ -21,19 +21,19 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pingora::prelude::{HttpPeer};
-use pingora::proxy::{ProxyHttp, Session};
-use pingora::{Error as PingoraError, Result as PingoraResult, ErrorType};
-use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
+use pingora::http::{RequestHeader, ResponseHeader};
+use pingora::prelude::HttpPeer;
+use pingora::proxy::{ProxyHttp, Session};
+use pingora::{Error as PingoraError, ErrorType, Result as PingoraResult};
 
 use async_trait::async_trait;
 use http::{HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::ClusterMetadata;
-use crate::gateway::Gateway;
 use crate::def;
+use crate::gateway::Gateway;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -58,6 +58,7 @@ pub struct RouterCtx {
     pub uri_origin: Option<String>,
     pub client_address: Option<String>,
     pub client_credentials: Option<String>,
+    pub enable_endpoint: bool,
 }
 
 #[async_trait]
@@ -66,14 +67,17 @@ impl ProxyHttp for ProxyRouter {
     type CTX = RouterCtx;
 
     // initial ctx values
-    fn new_ctx(&self) -> Self::CTX { RouterCtx {
-        cluster_identity: None,
-        cluster_address: 0,
-        proxy_retry: 0,
-        uri_origin: None,
-        client_address: None,
-        client_credentials: None,
-    }}
+    fn new_ctx(&self) -> Self::CTX {
+        RouterCtx {
+            cluster_identity: None,
+            cluster_address: 0,
+            proxy_retry: 0,
+            uri_origin: None,
+            client_address: None,
+            client_credentials: None,
+            enable_endpoint: false,
+        }
+    }
 
     // The upstream_peer phase executes after request_filter
     // this lifecycle returns the http peer
@@ -99,7 +103,7 @@ impl ProxyHttp for ProxyRouter {
     async fn request_filter(
         &self,
         session: &mut Session,
-        ctx: &mut Self::CTX
+        ctx: &mut Self::CTX,
     ) -> PingoraResult<bool>
     where
         Self::CTX: Send + Sync,
@@ -111,7 +115,11 @@ impl ProxyHttp for ProxyRouter {
         ctx.uri_origin = Some(cloned_req_header.uri.to_string());
 
         // select the cluster based on prefix
-        let path_result = &self.gateway.resolver_provider.select_cluster(&self.prefix_map, original_uri, session, ctx).await;
+        let path_result = &self
+            .gateway
+            .resolver_provider
+            .select_cluster(&self.prefix_map, original_uri, session, ctx)
+            .await;
         match path_result {
             true => return Ok(true),
             false => (),
@@ -129,13 +137,21 @@ impl ProxyHttp for ProxyRouter {
             if let Some(ip) = &cluster.get_ip() {
                 let allowed = ip.whitelist.iter().any(|allowed_ip| allowed_ip == address);
                 if !allowed {
-                    let _ = &self.gateway.response_provider.error_response(session, 403, "restricted ip address", None).await;
+                    let _ = &self
+                        .gateway
+                        .response_provider
+                        .error_response(session, 403, "restricted ip address", None)
+                        .await;
                     return Ok(true);
                 }
             }
         }
         // get client credential as the primary identity
-        if let Some(credential) = &self.gateway.request_provider.get_req_header_value(session, "Authorization") {
+        if let Some(credential) = &self
+            .gateway
+            .request_provider
+            .get_req_header_value(session, "Authorization")
+        {
             ctx.client_credentials = Some(credential.to_string());
         }
 
@@ -144,9 +160,13 @@ impl ProxyHttp for ProxyRouter {
             // check if global limiter is provided for this cluster
             if let Some(global_limiter_type) = limiter.get_global() {
                 match global_limiter_type {
-                    def::RatelimitType::Basic { basic} => {
+                    def::RatelimitType::Basic { basic } => {
                         // rate limit incoming request
-                        let limiter_result = &self.gateway.limiter_provider.global_limiter(basic.limit, session, ctx).await;
+                        let limiter_result = &self
+                            .gateway
+                            .limiter_provider
+                            .global_limiter(basic.limit, session, ctx)
+                            .await;
                         match limiter_result {
                             true => return Ok(true),
                             false => (),
@@ -159,7 +179,11 @@ impl ProxyHttp for ProxyRouter {
                 match client_limiter_type {
                     def::RatelimitType::Basic { basic } => {
                         // rate limit incoming request
-                        let limiter_result = &self.gateway.limiter_provider.client_limiter(basic.limit, session, ctx).await;
+                        let limiter_result = &self
+                            .gateway
+                            .limiter_provider
+                            .client_limiter(basic.limit, session, ctx)
+                            .await;
                         match limiter_result {
                             true => return Ok(true),
                             false => (),
@@ -173,14 +197,22 @@ impl ProxyHttp for ProxyRouter {
         if let Some(auth_type) = cluster.get_auth() {
             match auth_type {
                 def::AuthType::Key { key } => {
-                    let access = &self.gateway.auth_provider.basic_key(&key, session, ctx).await;
+                    let access = &self
+                        .gateway
+                        .auth_provider
+                        .basic_key(&key, session, ctx)
+                        .await;
                     match access {
                         true => return Ok(true),
                         false => (),
                     }
                 }
                 def::AuthType::JWT { jwt } => {
-                    let access = &self.gateway.auth_provider.basic_jwt(&self, &cluster, &jwt, session, ctx).await;
+                    let access = &self
+                        .gateway
+                        .auth_provider
+                        .basic_jwt(&self, &cluster, &jwt, session, ctx)
+                        .await;
                     match access {
                         true => return Ok(true),
                         false => (),
@@ -195,30 +227,31 @@ impl ProxyHttp for ProxyRouter {
             // get current path
             let path = session.req_header().uri.path();
             // check if the current uri matches any of the listed routes
-            let path_exist = routes
-                .iter()
-                .any(|route| {
-                    // check if routes provide a path
-                    if let Some(route_paths) = route.get_paths() {
-                        // find the current ui in the list of path
-                        route_paths.iter().any(|route_path| {
-                            path == route_path
-                        })
-                    } else {
-                        false
-                    }
-                });
-            // validate if path exist
-            if path_exist {
-                println!("uri path match: {}", path)
-            }
+            // if match, enable endpoint
+            ctx.enable_endpoint = routes.iter().any(|route| {
+                // check if routes provide a path
+                if let Some(route_paths) = route.get_paths() {
+                    // find the current ui in the list of path
+                    route_paths.iter().any(|route_path| path == route_path)
+                } else {
+                    false
+                }
+            });
+        }
+        // if endpoint is enabled
+        if ctx.enable_endpoint {
+            println!("endpoint is enabled")
         }
         // continue the request
         Ok(false)
     }
 
     // filter if response should be cached by enabling it
-    fn request_cache_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> PingoraResult<()> {
+    fn request_cache_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> PingoraResult<()> {
         // select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
         // get request method
@@ -233,14 +266,18 @@ impl ProxyHttp for ProxyRouter {
     }
 
     // generate the cache key, if the filter says the response should be cache
-    fn cache_key_callback(&self, session: &Session, ctx: &mut Self::CTX) -> PingoraResult<CacheKey> {
+    fn cache_key_callback(
+        &self,
+        session: &Session,
+        ctx: &mut Self::CTX,
+    ) -> PingoraResult<CacheKey> {
         // select the cluster based on the selected index
         let cluster = &self.clusters[ctx.cluster_address];
         // generate key based on the uri method
         // this makes the cache meta unique and prevent cache conflict among other routes
         let key = match ctx.uri_origin.clone() {
             Some(origin) => CacheKey::new(cluster.get_name(), &origin, ""),
-            None => CacheKey::default(session.req_header())
+            None => CacheKey::default(session.req_header()),
         };
         Ok(key)
     }
@@ -340,13 +377,19 @@ impl ProxyHttp for ProxyRouter {
                 CachePhase::Hit => upstream_response.insert_header("x-cache-status", "hit")?,
                 CachePhase::Miss => upstream_response.insert_header("x-cache-status", "miss")?,
                 CachePhase::Stale => upstream_response.insert_header("x-cache-status", "stale")?,
-                CachePhase::Expired => upstream_response.insert_header("x-cache-status", "expired")?,
-                CachePhase::Revalidated | CachePhase::RevalidatedNoCache(_) => upstream_response.insert_header("x-cache-status", "revalidated")?,
+                CachePhase::Expired => {
+                    upstream_response.insert_header("x-cache-status", "expired")?
+                }
+                CachePhase::Revalidated | CachePhase::RevalidatedNoCache(_) => {
+                    upstream_response.insert_header("x-cache-status", "revalidated")?
+                }
                 _ => upstream_response.insert_header("x-cache-status", "invalid")?,
             }
         } else {
             match session.cache.phase() {
-                CachePhase::Disabled(NoCacheReason::Deferred) => upstream_response.insert_header("x-cache-status", "deferred")?,
+                CachePhase::Disabled(NoCacheReason::Deferred) => {
+                    upstream_response.insert_header("x-cache-status", "deferred")?
+                }
                 _ => upstream_response.insert_header("x-cache-status", "no-cache")?,
             }
         }

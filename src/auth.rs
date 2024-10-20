@@ -19,7 +19,7 @@
 
 use pingora::prelude::Session;
 
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::ClusterMetadata;
@@ -54,15 +54,14 @@ impl AuthProvider {
     }
 
     // basic key auth
-    pub async fn basic_key(
-        &self,
-        key: &Key,
-        session: &mut Session,
-        _ctx: &mut RouterCtx,
-    ) -> bool {
+    pub async fn basic_key(&self, key: &Key, session: &mut Session, _ctx: &mut RouterCtx) -> bool {
         let req_header = session.req_header();
         // get key from bearer headers
-        if let Some(creds) = req_header.headers.get("Authorization").map(|v| v.as_bytes()) {
+        if let Some(creds) = req_header
+            .headers
+            .get("Authorization")
+            .map(|v| v.as_bytes())
+        {
             // if key exist, parse key to str
             if let Ok(creds_str) = std::str::from_utf8(creds) {
                 // clean key from headers
@@ -72,18 +71,27 @@ impl AuthProvider {
                     true => false, // if key are contained, continue request
                     false => {
                         // return 403 because key is not provided/allowed
-                        let _ = &self.response_provider.error_response(session, 403, "Invalid API Key", None).await;
+                        let _ = &self
+                            .response_provider
+                            .error_response(session, 403, "Invalid API Key", None)
+                            .await;
                         true
                     }
                 }
             } else {
                 // return 502, because this error happen during string parse
-                let _ = &self.response_provider.error_response(session, 502, "Unable to parse key", None).await;
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 502, "Unable to parse key", None)
+                    .await;
                 true
             }
         } else {
             // return 403 because key does not exist in request
-            let _ = &self.response_provider.error_response(session, 403, "Key is required", None).await;
+            let _ = &self
+                .response_provider
+                .error_response(session, 403, "Key is required", None)
+                .await;
             true
         }
     }
@@ -100,7 +108,11 @@ impl AuthProvider {
     ) -> bool {
         let req_header = session.req_header();
         // get token from bearer headers
-        if let Some(token) = req_header.headers.get("Authorization").map(|v| v.as_bytes()) {
+        if let Some(token) = req_header
+            .headers
+            .get("Authorization")
+            .map(|v| v.as_bytes())
+        {
             // parse token to str from utf8
             if let Ok(parsed_token) = std::str::from_utf8(token) {
                 // remover the Bearer from the headers
@@ -111,7 +123,7 @@ impl AuthProvider {
                 let token_claim = decode::<Claims>(
                     cleaned_token,
                     &DecodingKey::from_secret(jwt.secret.as_ref()),
-                    &validation
+                    &validation,
                 );
                 // checks if token is valid
                 match token_claim {
@@ -122,50 +134,61 @@ impl AuthProvider {
                         // if no consumers is provided, auth layer ends here
                         if let Some(consumers) = cluster.get_consumers() {
                             // checks if the consumer from token is allowed by the defined service consumer
-                            let (client_consumer_name, allowed_acl) = if let Some(consumer) = consumers.iter().find(|consumer| {
-                                // Check if consumer token exists in the allowed list
-                                let name = consumer.get_name();
-                                claim.claims.consumer == *name
-                            }) {
+                            let (client_consumer_name, allowed_acl) = if let Some(consumer) =
+                                consumers.iter().find(|consumer| {
+                                    // Check if consumer token exists in the allowed list
+                                    let name = consumer.get_name();
+                                    claim.claims.consumer == *name
+                                }) {
                                 // If the consumer is found, return its name and ACL
                                 (consumer.get_name(), consumer.get_acl())
                             } else {
                                 // If the consumer is not found, return a 403 response
-                                let _ = &self.response_provider.error_response(session, 403, "Unauthorized consumer", None).await;
+                                let _ = &self
+                                    .response_provider
+                                    .error_response(session, 403, "Unauthorized consumer", None)
+                                    .await;
                                 return true; // Indicate that the error response was handled
                             };
 
                             // checks if the gateway consumer data is provided
                             if let Some(def_consumer) = &gateway.consumers {
                                 // if its provided, trying to query the acl by consumer name that we got previously
-                                let acl = if let Some(consumer) = def_consumer
-                                    .iter()
-                                    .find(|consumer| {
+                                let acl = if let Some(consumer) =
+                                    def_consumer.iter().find(|consumer| {
                                         // Check if the consumer exists in the consumer gateway
                                         let name = consumer.get_name();
                                         client_consumer_name == name
-                                    })
-                                {
+                                    }) {
                                     // If the consumer is found, return the ACL
                                     consumer.get_acl()
                                 } else {
                                     // If the consumer is not found, return 502 and stop execution
-                                    let _ = &self.response_provider.error_response(session, 502, "Consumer not found", None).await;
+                                    let _ = &self
+                                        .response_provider
+                                        .error_response(session, 502, "Consumer not found", None)
+                                        .await;
                                     return true;
                                 }; // we should return 502, because we are using consumer, but they are not defined on the gateway
 
                                 // checks if the acl we got from the consumer gateway config match the allowed acl in the service
-                                let authorized = acl
-                                    .iter()
-                                    .any(|acl_item| {
-                                        // check if exist
-                                        allowed_acl.iter().any(|allowed_acl_item| {
-                                            allowed_acl_item == acl_item
-                                        })
-                                    });
+                                let authorized = acl.iter().any(|acl_item| {
+                                    // check if exist
+                                    allowed_acl
+                                        .iter()
+                                        .any(|allowed_acl_item| allowed_acl_item == acl_item)
+                                });
                                 // checks if the client is allowed by the acl
                                 if !authorized {
-                                    let _ = &self.response_provider.error_response(session, 403, "Unauthorized access control", None).await;
+                                    let _ = &self
+                                        .response_provider
+                                        .error_response(
+                                            session,
+                                            403,
+                                            "Unauthorized access control",
+                                            None,
+                                        )
+                                        .await;
                                     true
                                 } else {
                                     // when client is authorized, continue the request
@@ -174,7 +197,10 @@ impl AuthProvider {
                                 }
                             } else {
                                 // return 502 because consumers is not defined in the gateway config
-                                let _ = &self.response_provider.error_response(session, 502, "Undefined consumer", None).await;
+                                let _ = &self
+                                    .response_provider
+                                    .error_response(session, 502, "Undefined consumer", None)
+                                    .await;
                                 true
                             }
                         } else {
@@ -185,18 +211,27 @@ impl AuthProvider {
                     Err(error) => {
                         // return 403 due to invalid token
                         let message = format!("Invalid Token: {}", error);
-                        let _ = &self.response_provider.error_response(session, 403, message.as_str(), None).await;
+                        let _ = &self
+                            .response_provider
+                            .error_response(session, 403, message.as_str(), None)
+                            .await;
                         true
                     }
                 }
             } else {
                 // return 400 due to header parse error
-                let _ = &self.response_provider.error_response(session, 400, "Unable to parse token", None).await;
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 400, "Unable to parse token", None)
+                    .await;
                 true
             }
         } else {
             // return 403 due to bearer does not exist in headers
-            let _ = &self.response_provider.error_response(session, 403, "Token is required", None).await;
+            let _ = &self
+                .response_provider
+                .error_response(session, 403, "Token is required", None)
+                .await;
             true
         }
     }

@@ -25,15 +25,13 @@ use pingora::lb::LoadBalancer;
 use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
 
-use crate::discovery::{Discovery, DiscoveryBackgroundService};
 use crate::bucket;
-use crate::def;
 use crate::config;
+use crate::def;
+use crate::discovery::{Discovery, DiscoveryBackgroundService};
 
 // build the cluster with hardcoded upstream
-pub fn build_cluster_service(
-    upstreams: &[&str],
-) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
+pub fn build_cluster_service(upstreams: &[&str]) -> GenBackgroundService<LoadBalancer<RoundRobin>> {
     let mut cluster = LoadBalancer::try_from_iter(upstreams).unwrap();
     // upstream health check
     // frequency is set to every 1 second by default
@@ -47,7 +45,11 @@ pub fn build_cluster_service(
 // validate clusters configuration
 fn validate_cluster_config(config: &config::ClusterConfig) -> bool {
     // mandatory cluster identity
-    if config.name.is_none() || config.prefix.is_none() || config.host.is_none() || config.tls.is_none() {
+    if config.name.is_none()
+        || config.prefix.is_none()
+        || config.host.is_none()
+        || config.tls.is_none()
+    {
         println!("CLUSTER IDENTITY ERROR");
         return false;
     }
@@ -125,7 +127,7 @@ impl ClusterMetadata {
         &self.cache_ttl
     }
     pub fn get_retry(&self) -> &Option<usize> {
-      &self.retry
+        &self.retry
     }
     pub fn get_timeout(&self) -> &Option<u64> {
         &self.timeout
@@ -162,9 +164,7 @@ pub struct BuiltClusters {
 }
 
 // build the entire cluster from the configuration
-pub fn build_cluster(
-    yaml_clusters_configuration: Vec<config::ClusterConfig>
-) -> BuiltClusters {
+pub fn build_cluster(yaml_clusters_configuration: Vec<config::ClusterConfig>) -> BuiltClusters {
     // Validate if there is prefix duplication
     match validate_duplicated_prefix(&yaml_clusters_configuration) {
         true => panic!("found duplicated upstream prefix"),
@@ -178,7 +178,7 @@ pub fn build_cluster(
             println!("discovery found! creating consul connection...");
             Some(Discovery::new_consul_discovery())
         }
-        false => None
+        false => None,
     };
 
     // Declare a mutable list for built process to be added as background processing
@@ -192,8 +192,8 @@ pub fn build_cluster(
     for (idx, cluster_conf) in yaml_clusters_configuration.into_iter().enumerate() {
         // Validate cluster config
         match validate_cluster_config(&cluster_conf) {
-            true => {},
-            false => panic!("invalid upstream configuration")
+            true => {}
+            false => panic!("invalid upstream configuration"),
         }
 
         // Check if cluster uses discovery, otherwise build the hardcoded upstream uri
@@ -206,16 +206,21 @@ pub fn build_cluster(
                     def::DiscoveryType::Consul { consul } => {
                         let discovery = discovery.as_ref().expect("Error Consul Connection");
                         consul.build_cluster(discovery, &mut updater_background_process)
-                    },
+                    }
                 }
             }
             None => {
                 // Build default hardcoded http cluster
                 let cluster = build_cluster_service(
-                    &cluster_conf.upstream.unwrap().iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                    &cluster_conf
+                        .upstream
+                        .unwrap()
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>(),
                 );
                 cluster
-            },
+            }
         };
 
         // check if cluster is using cache
@@ -228,17 +233,17 @@ pub fn build_cluster(
                     def::CacheType::Memory { memory } => {
                         let (storage, ttl) = memory.new_storage();
                         (storage, ttl)
-                    },
+                    }
                     // if cache using redis
                     // CacheType::Redis { redis } => (None, None)
                 };
                 storage
-            },
-            None => (None, None)
+            }
+            None => (None, None),
         };
 
         // Build the cluster metadata and add it to the cluster list
-        clusters.push( ClusterMetadata {
+        clusters.push(ClusterMetadata {
             name: cluster_conf.name.unwrap_or("unnamed-cluster".to_string()),
             host: cluster_conf.host.unwrap_or("localhost".to_string()),
             tls: cluster_conf.tls.unwrap_or(false),

@@ -21,17 +21,17 @@ use std::any::Any;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use pingora::cache::storage::{HandleHit, HandleMiss, HitHandler, MissHandler};
 use pingora::cache::key::{CacheHashKey, CacheKey, CompactCacheKey, HashBinary};
+use pingora::cache::storage::{HandleHit, HandleMiss, HitHandler, MissHandler};
 use pingora::cache::trace::{Span, SpanHandle};
 use pingora::cache::{CacheMeta, PurgeType, Storage};
 use pingora::{Error, Result};
 
-use scc::HashMap;
-use serde::{Deserialize, Serialize};
 use ahash::RandomState;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
+use scc::HashMap;
+use serde::{Deserialize, Serialize};
 
 // used in cache object to stores the cache meta in bytes
 type BinaryMeta = (Bytes, Bytes);
@@ -101,7 +101,13 @@ impl Storage for MemoryStorage {
         // checks if the cache is not expired yet
         // if cache expires, purge or remove the cache immediately from hashmap
         if meta.fresh_until() < SystemTime::now() {
-            self.purge(&key.to_compact(), PurgeType::Invalidation, &Span::inactive().handle()).await.expect("PURGE ERROR");
+            self.purge(
+                &key.to_compact(),
+                PurgeType::Invalidation,
+                &Span::inactive().handle(),
+            )
+            .await
+            .expect("PURGE ERROR");
         }
         // return the meta and the hit handler
         Ok(Some((

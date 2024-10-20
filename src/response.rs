@@ -19,8 +19,9 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
+
+use pingora::http::ResponseHeader;
 use pingora::proxy::Session;
-use pingora::http::{ResponseHeader};
 
 use bytes::Bytes;
 use http::{HeaderName, HeaderValue, StatusCode};
@@ -44,8 +45,8 @@ impl ResponseProvider {
         session: &mut Session,
         res_status_code: usize,
         res_message: &str,
-        headers: Option<HashMap<&str, &str>>
-    ) -> Result<(),()> {
+        headers: Option<HashMap<&str, &str>>,
+    ) -> Result<(), ()> {
         // new response header
         let status_code = StatusCode::from_u16(res_status_code as u16).unwrap();
         let mut res_header = ResponseHeader::build(status_code, None).unwrap();
@@ -60,7 +61,9 @@ impl ResponseProvider {
             }
         }
         // response body with json type
-        res_header.insert_header("Content-Type", "application/json").unwrap();
+        res_header
+            .insert_header("Content-Type", "application/json")
+            .unwrap();
         let error_response = Response {
             status_code: res_status_code,
             message: res_message.to_string(),
@@ -68,7 +71,10 @@ impl ResponseProvider {
         // parse response body as json bytes
         let json_body = serde_json::to_string(&error_response).unwrap();
         let body_bytes = Some(Bytes::from(json_body));
-        session.write_response_header(Box::new(res_header), false).await.unwrap();
+        session
+            .write_response_header(Box::new(res_header), false)
+            .await
+            .unwrap();
         session.write_response_body(body_bytes, true).await.unwrap();
         session.set_keepalive(None);
         Ok(())

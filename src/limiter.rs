@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 /**
  * Copyright (c) 2024-2025 Glaive, Inc.
  *
@@ -17,15 +16,17 @@ use std::collections::HashMap;
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
 use std::time::Duration;
-use bytes::Bytes;
-use pingora::prelude::Session;
+use std::collections::HashMap;
+
 use pingora::http::ResponseHeader;
+use pingora::prelude::Session;
 use pingora_limits::rate::Rate;
 
+use bytes::Bytes;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+
 use crate::proxy::RouterCtx;
 use crate::response::ResponseProvider;
 
@@ -72,11 +73,14 @@ impl LimiterProvider {
                 headers.insert("X-Rate-Limit-Limit", limit_str.as_str());
                 headers.insert("X-Rate-Limit-Remaining", "0");
                 headers.insert("X-Rate-Limit-Reset", "1");
-                let _ = &self.response_provider.error_response(session, 429, "Too many request", Some(headers)).await;
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 429, "Too many request", Some(headers))
+                    .await;
                 return true;
             }
             // continue request
-            return false
+            return false;
         }
         // todo here, either ignore or throw errors
         false
@@ -92,7 +96,10 @@ impl LimiterProvider {
         ctx: &mut RouterCtx,
     ) -> bool {
         // Get client credential or address
-        let client_credential = ctx.client_credentials.as_ref().or(ctx.client_address.as_ref());
+        let client_credential = ctx
+            .client_credentials
+            .as_ref()
+            .or(ctx.client_address.as_ref());
         // check if credential exist
         if let Some(credential) = client_credential {
             // retrieve the current window requests
@@ -105,11 +112,14 @@ impl LimiterProvider {
                 headers.insert("X-Rate-Limit-Limit", limit_str.as_str());
                 headers.insert("X-Rate-Limit-Remaining", "0");
                 headers.insert("X-Rate-Limit-Reset", "1");
-                let _ = &self.response_provider.error_response(session, 429, "Too many request", Some(headers)).await;
+                let _ = &self
+                    .response_provider
+                    .error_response(session, 429, "Too many request", Some(headers))
+                    .await;
                 return true;
             }
             // continue request
-            return false
+            return false;
         };
         // todo here, either ignore or throw errors
         false

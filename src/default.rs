@@ -17,12 +17,12 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use pingora::prelude::{HttpPeer, ProxyHttp, Session, Result as PingoraResult};
+use pingora::prelude::{HttpPeer, ProxyHttp, Result as PingoraResult, Session};
 use pingora::http::ResponseHeader;
 
 use async_trait::async_trait;
-use serde::Serialize;
 use bytes::Bytes;
+use serde::Serialize;
 
 #[derive(Serialize)]
 struct Response {
@@ -44,12 +44,14 @@ impl ProxyHttp for DefaultProxy {
         &self,
         _session: &mut Session,
         _ctx: &mut Self::CTX,
-    ) -> PingoraResult<Box<HttpPeer>> { Ok(Box::new(HttpPeer::new("", false, "".to_string()))) }
+    ) -> PingoraResult<Box<HttpPeer>> {
+        Ok(Box::new(HttpPeer::new("", false, "".to_string())))
+    }
 
     async fn request_filter(
         &self,
         session: &mut Session,
-        _ctx: &mut Self::CTX
+        _ctx: &mut Self::CTX,
     ) -> PingoraResult<bool>
     where
         Self::CTX: Send + Sync,
@@ -66,7 +68,9 @@ impl ProxyHttp for DefaultProxy {
         let json_body = serde_json::to_string(&body).unwrap();
         let body_bytes = Some(Bytes::from(json_body));
         session.set_keepalive(None);
-        session.write_response_header(Box::new(header), true).await?;
+        session
+            .write_response_header(Box::new(header), true)
+            .await?;
         session.write_response_body(body_bytes, true).await?;
         // stop lifetime
         Ok(true)

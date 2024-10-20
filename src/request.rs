@@ -22,11 +22,14 @@ use std::str::FromStr;
 
 use pingora::{http::RequestHeader, proxy::Session};
 
+use http::HeaderName;
 use once_cell::sync::Lazy;
-use http::{HeaderName};
 
-pub static HTTP_HEADER_X_FORWARDED_FOR: Lazy<HeaderName> = Lazy::new(|| HeaderName::from_str("X-Forwarded-For").unwrap());
-pub static HTTP_HEADER_X_REAL_IP: Lazy<HeaderName> = Lazy::new(|| HeaderName::from_str("X-Real-Ip").unwrap());
+pub static HTTP_HEADER_X_FORWARDED_FOR: Lazy<HeaderName> =
+    Lazy::new(|| HeaderName::from_str("X-Forwarded-For").unwrap());
+    
+pub static HTTP_HEADER_X_REAL_IP: Lazy<HeaderName> =
+    Lazy::new(|| HeaderName::from_str("X-Real-Ip").unwrap());
 
 pub struct RequestProvider {}
 
@@ -37,10 +40,7 @@ impl RequestProvider {
     }
 
     // get client remote address
-    fn get_remote_addr(
-        &self,
-        session: &Session
-    ) -> Option<(String, u16)> {
+    fn get_remote_addr(&self, session: &Session) -> Option<(String, u16)> {
         if let Some(addr) = session.client_addr() {
             if let Some(addr) = addr.as_inet() {
                 return Some((addr.ip().to_string(), addr.port()));
@@ -52,17 +52,10 @@ impl RequestProvider {
     /// Gets client ip from X-Forwarded-For,
     /// If none, get from X-Real-Ip,
     /// If none, get remote addr.
-    pub fn get_client_ip(
-        &self,
-        session: &Session
-    ) -> Option<String> {
+    pub fn get_client_ip(&self, session: &Session) -> Option<String> {
         // Check X-Forwarded-For header
         if let Some(value) = session.get_header(HTTP_HEADER_X_FORWARDED_FOR.clone()) {
-            let arr: Vec<&str> = value
-                .to_str()
-                .unwrap_or_default()
-                .split(", ")
-                .collect();
+            let arr: Vec<&str> = value.to_str().unwrap_or_default().split(", ").collect();
             if !arr.is_empty() {
                 return Some(arr[0].trim().to_string());
             }
@@ -80,11 +73,7 @@ impl RequestProvider {
     }
 
     /// Gets string value from req header.
-    pub fn get_req_header_value<'a>(
-        &'a self,
-        session: &'a Session,
-        key: &str,
-    ) -> Option<&'a str> {
+    pub fn get_req_header_value<'a>(&'a self, session: &'a Session, key: &str) -> Option<&'a str> {
         let req_header = session.req_header();
         if let Some(value) = req_header.headers.get(key) {
             if let Ok(value) = value.to_str() {
@@ -113,10 +102,7 @@ impl RequestProvider {
     }
 
     /// Converts query string to map.
-    pub fn convert_query_map(
-        &self,
-        query: &str,
-    ) -> HashMap<String, String> {
+    pub fn convert_query_map(&self, query: &str) -> HashMap<String, String> {
         let mut m = HashMap::new();
         for item in query.split('&') {
             if let Some((key, value)) = item.split_once('=') {
@@ -147,10 +133,7 @@ impl RequestProvider {
     /// Get request host in this order of precedence:
     /// host name from the request line,
     /// or host name from the "Host" request header field
-    pub fn get_host<'a>(
-        &'a self,
-        header: &'a RequestHeader,
-    ) -> Option<&str> {
+    pub fn get_host<'a>(&'a self, header: &'a RequestHeader) -> Option<&str> {
         if let Some(host) = header.uri.host() {
             return Some(host);
         }
@@ -163,16 +146,9 @@ impl RequestProvider {
     }
 
     /// Get the content length from http request header.
-    pub fn get_content_length(
-        &self,
-        header: &RequestHeader,
-    ) -> Option<usize> {
-        if let Some(content_length) =
-            header.headers.get(http::header::CONTENT_LENGTH)
-        {
-            if let Ok(size) =
-                content_length.to_str().unwrap_or_default().parse::<usize>()
-            {
+    pub fn get_content_length(&self, header: &RequestHeader) -> Option<usize> {
+        if let Some(content_length) = header.headers.get(http::header::CONTENT_LENGTH) {
+            if let Ok(size) = content_length.to_str().unwrap_or_default().parse::<usize>() {
                 return Some(size);
             }
         }
