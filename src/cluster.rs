@@ -26,14 +26,9 @@ use pingora::prelude::{background_service, RoundRobin, TcpHealthCheck};
 use pingora::services::background::GenBackgroundService;
 
 use crate::discovery::{Discovery, DiscoveryBackgroundService};
-use crate::bucket::CacheBucket;
-use crate::config::auth::{AuthType, IpWhitelist};
-use crate::config::cache::CacheType;
-use crate::config::discovery::DiscoveryType;
-use crate::config::cluster::ClusterConfig;
-use crate::config::consumer::Consumer;
-use crate::config::limiter::Limiter;
-use crate::config::route::Route;
+use crate::bucket;
+use crate::def;
+use crate::config;
 
 // build the cluster with hardcoded upstream
 pub fn build_cluster_service(
@@ -50,7 +45,7 @@ pub fn build_cluster_service(
 }
 
 // validate clusters configuration
-fn validate_cluster_config(config: &ClusterConfig) -> bool {
+fn validate_cluster_config(config: &config::ClusterConfig) -> bool {
     // mandatory cluster identity
     if config.name.is_none() || config.prefix.is_none() || config.host.is_none() || config.tls.is_none() {
         println!("CLUSTER IDENTITY ERROR");
@@ -74,7 +69,7 @@ fn validate_cluster_config(config: &ClusterConfig) -> bool {
 }
 
 // validate duplicates upstream prefix
-fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
+fn validate_duplicated_prefix(clusters: &[config::ClusterConfig]) -> bool {
     let mut seen = HashSet::new();
     for cluster in clusters {
         if !seen.insert(&cluster.prefix) {
@@ -85,7 +80,7 @@ fn validate_duplicated_prefix(clusters: &[ClusterConfig]) -> bool {
 }
 
 // Validate if any cluster has a discovery configuration
-fn has_discovery_enabled(clusters: &[ClusterConfig]) -> bool {
+fn has_discovery_enabled(clusters: &[config::ClusterConfig]) -> bool {
     // Return true if any cluster has discovery configuration
     clusters.iter().any(|cluster| cluster.discovery.is_some())
 }
@@ -96,15 +91,15 @@ pub struct ClusterMetadata {
     pub name: String,
     pub host: String,
     pub tls: bool,
-    pub limiter: Option<Limiter>,
-    pub cache_storage: Option<CacheBucket>,
+    pub limiter: Option<def::Limiter>,
+    pub cache_storage: Option<bucket::CacheBucket>,
     pub cache_ttl: Option<usize>,
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
-    pub auth: Option<AuthType>,
-    pub ip: Option<IpWhitelist>,
-    pub consumers: Option<Vec<Consumer>>,
-    pub routes: Option<Vec<Route>>,
+    pub auth: Option<def::AuthType>,
+    pub ip: Option<def::IpWhitelist>,
+    pub consumers: Option<Vec<def::Consumer>>,
+    pub routes: Option<Vec<config::RouteConfig>>,
     pub upstream: Arc<LoadBalancer<RoundRobin>>,
 }
 
@@ -118,10 +113,10 @@ impl ClusterMetadata {
     pub fn get_tls(&self) -> &bool {
         &self.tls
     }
-    pub fn get_rate_limit(&self) -> &Option<Limiter> {
+    pub fn get_rate_limit(&self) -> &Option<def::Limiter> {
         &self.limiter
     }
-    pub fn get_cache_storage(&self) -> &Option<CacheBucket> {
+    pub fn get_cache_storage(&self) -> &Option<bucket::CacheBucket> {
         &self.cache_storage
     }
     pub fn get_cache_ttl(&self) -> &Option<usize> {
@@ -133,16 +128,16 @@ impl ClusterMetadata {
     pub fn get_timeout(&self) -> &Option<u64> {
         &self.timeout
     }
-    pub fn get_auth(&self) -> &Option<AuthType> {
+    pub fn get_auth(&self) -> &Option<def::AuthType> {
         &self.auth
     }
-    pub fn get_ip(&self) -> &Option<IpWhitelist> {
+    pub fn get_ip(&self) -> &Option<def::IpWhitelist> {
         &self.ip
     }
-    pub fn get_consumers(&self) -> &Option<Vec<Consumer>> {
+    pub fn get_consumers(&self) -> &Option<Vec<def::Consumer>> {
         &self.consumers
     }
-    pub fn get_routes(&self) -> &Option<Vec<Route>> {
+    pub fn get_routes(&self) -> &Option<Vec<config::RouteConfig>> {
         &self.routes
     }
     pub fn get_upstream(&self) -> &Arc<LoadBalancer<RoundRobin>> {
@@ -160,7 +155,7 @@ pub struct BuiltClusters {
 
 // build the entire cluster from the configuration
 pub fn build_cluster(
-    yaml_clusters_configuration: Vec<ClusterConfig>
+    yaml_clusters_configuration: Vec<config::ClusterConfig>
 ) -> BuiltClusters {
     // Validate if there is prefix duplication
     match validate_duplicated_prefix(&yaml_clusters_configuration) {
@@ -200,7 +195,7 @@ pub fn build_cluster(
                 // select and build based on discovery strategy
                 match discovery_type {
                     // consul strategy
-                    DiscoveryType::Consul { consul } => {
+                    def::DiscoveryType::Consul { consul } => {
                         let discovery = discovery.as_ref().expect("Error Consul Connection");
                         consul.build_cluster(discovery, &mut updater_background_process)
                     },
@@ -222,7 +217,7 @@ pub fn build_cluster(
                 // check the storage strategy
                 let storage = match cache_type {
                     // if cache uses memory
-                    CacheType::Memory { memory } => {
+                    def::CacheType::Memory { memory } => {
                         let (storage, ttl) = memory.new_storage();
                         (storage, ttl)
                     },

@@ -35,7 +35,7 @@ This is currently the plan for future key features to be implemented.
 - [ ] Built in external Authentication
 - [x] Authorization
 - [x] Consumer ACL
-- [ ] IP Restriction
+- [x] IP Restriction
 - [ ] OAuth 2.0 Authentication
 - [x] Consul Discovery
 - [ ] DNS Discovery

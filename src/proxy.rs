@@ -30,10 +30,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::ClusterMetadata;
-use crate::config::auth::AuthType;
-use crate::config::limiter::RatelimitType;
-use crate::config::consumer::Consumer;
 use crate::gateway::Gateway;
+use crate::def;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -47,7 +45,7 @@ pub struct ProxyRouter {
     pub gateway: Gateway,
     pub clusters: Vec<ClusterMetadata>,
     pub prefix_map: HashMap<String, usize>,
-    pub consumers: Option<Vec<Consumer>>,
+    pub consumers: Option<Vec<def::Consumer>>,
 }
 
 // struct for proxy context
@@ -123,6 +121,7 @@ impl ProxyHttp for ProxyRouter {
 
         // get client address as default identity
         if let Some(address) = &self.gateway.request_provider.get_client_ip(session) {
+            println!("client ip address: {}", address);
             ctx.client_address = Some(address.clone());
             // check if ip restriction is enabled
             if let Some(ip) = &cluster.get_ip() {
@@ -143,7 +142,7 @@ impl ProxyHttp for ProxyRouter {
             // check if global limiter is provided for this cluster
             if let Some(global_limiter_type) = limiter.get_global() {
                 match global_limiter_type {
-                    RatelimitType::Basic { basic} => {
+                    def::RatelimitType::Basic { basic} => {
                         // rate limit incoming request
                         let limiter_result = &self.gateway.limiter_provider.global_limiter(basic.limit, session, ctx).await;
                         match limiter_result {
@@ -156,7 +155,7 @@ impl ProxyHttp for ProxyRouter {
             // check if client limiter is provided for this cluster
             if let Some(client_limiter_type) = limiter.get_client() {
                 match client_limiter_type {
-                    RatelimitType::Basic { basic } => {
+                    def::RatelimitType::Basic { basic } => {
                         // rate limit incoming request
                         let limiter_result = &self.gateway.limiter_provider.client_limiter(basic.limit, session, ctx).await;
                         match limiter_result {
@@ -171,14 +170,14 @@ impl ProxyHttp for ProxyRouter {
         // cluster authentication
         if let Some(auth_type) = cluster.get_auth() {
             match auth_type {
-                AuthType::Key { key } => {
+                def::AuthType::Key { key } => {
                     let access = &self.gateway.auth_provider.basic_key(&key, session, ctx).await;
                     match access {
                         true => return Ok(true),
                         false => (),
                     }
                 }
-                AuthType::JWT { jwt } => {
+                def::AuthType::JWT { jwt } => {
                     let access = &self.gateway.auth_provider.basic_jwt(&self, &cluster, &jwt, session, ctx).await;
                     match access {
                         true => return Ok(true),

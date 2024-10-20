@@ -23,7 +23,7 @@ use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::ClusterMetadata;
-use crate::config::auth::{Jwt, Key};
+use crate::def::{Jwt, Key};
 use crate::proxy::{ProxyRouter, RouterCtx};
 use crate::response::ResponseProvider;
 

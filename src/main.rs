@@ -27,6 +27,7 @@ mod cache;
 mod bucket;
 mod default;
 mod config;
+mod def;
 mod request;
 mod gateway;
 mod response;
@@ -42,7 +43,7 @@ use tracing::info;
 use tracing_subscriber::fmt;
 
 use crate::cluster::build_cluster;
-use crate::config::config::load_config;
+use crate::config::load_config;
 use crate::default::DefaultProxy;
 use crate::gateway::Gateway;
 use crate::proxy::ProxyRouter;

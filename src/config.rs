@@ -22,12 +22,14 @@ use std::sync::Arc;
 
 use pingora::server::configuration::ServerConf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::config::{cluster, consumer};
+use crate::def;
 
+// this is the main configuration for the systems
+// providing low level flexibility
 #[derive(Debug, Deserialize)]
-struct Configuration {
+struct SystemConfig {
     /// Version
     pub version: Option<usize>,
     /// Whether to run this process in the background.
@@ -81,14 +83,133 @@ struct Configuration {
     /// for debugging purposes.
     /// Note: this is an _unstable_ field that may be renamed or removed in the future.
     pub upstream_debug_ssl_keylog: Option<bool>,
+    /// anything below here will be used as gateway declaration config
+    /// 
     /// Upper stream Cluster Configurations
-    pub clusters: Option<Vec<cluster::ClusterConfig>>,
+    pub clusters: Option<Vec<ClusterConfig>>,
     /// Consumers list, this act something as database for the acl
-    pub consumers: Option<Vec<consumer::Consumer>>,
+    pub consumers: Option<Vec<def::Consumer>>,
+}
+
+// Individual cluster configuration
+#[derive(Debug, Deserialize)]
+pub struct ClusterConfig {
+    // this is the main service name & its mandatory
+    pub name: Option<String>,
+    // the prefix is mandatory. responsible for the uri path for the proxy to handle
+    // make sure to prevent prefix duplication and invalid format
+    pub prefix: Option<String>,
+    // the host is mandatory. the host is responsible for the SNI and Headers
+    pub host: Option<String>,
+    // the TLS is mandatory. it checks if the proxy should be secured as HTTPS
+    pub tls: Option<bool>,
+    // discovery allows you to discover services, the default is consul.
+    // if the discovery config is provided, the upstream config will be ignored
+    pub discovery: Option<def::DiscoveryType>,
+    // the rate limit responsible for the maximum request to be limited
+    pub rate_limit: Option<def::Limiter>,
+    // the used cache type
+    pub cache: Option<def::CacheType>,
+    // the retry and timout mechanism is provided for connection failures
+    pub retry: Option<usize>,
+    pub timeout: Option<u64>,
+    // the headers opt for insert and remove
+    pub headers: Option<def::Headers>,
+    // enables ip restriction and whitelisted only
+    pub ip: Option<def::IpWhitelist>,
+    // the global auth strategy for the service
+    pub auth: Option<def::AuthType>,
+    // the global consumers for the service
+    pub consumers: Option<Vec<def::Consumer>>,
+    // the upstream is the hardcoded uri for proxy
+    // note: the upstream will be ignored if you provide discovery in the configuration
+    pub upstream: Option<Vec<String>>,
+    // routes or endpoint configuration
+    pub routes: Option<Vec<RouteConfig>>,
+}
+
+impl ClusterConfig {
+    pub fn get_name(&self) -> &Option<String> {
+        &self.name
+    }
+    pub fn get_prefix(&self) -> &Option<String> {
+        &self.prefix
+    }
+    pub fn get_host(&self) -> &Option<String> {
+        &self.host
+    }
+    pub fn get_tls(&self) -> &Option<bool> {
+        &self.tls
+    }
+    pub fn get_discovery(&self) -> &Option<def::DiscoveryType> {
+        &self.discovery
+    }
+    pub fn get_rate_limit(&self) -> &Option<def::Limiter> {
+        &self.rate_limit
+    }
+    pub fn get_cache(&self) -> &Option<def::CacheType> {
+        &self.cache
+    }
+    pub fn get_retry(&self) -> &Option<usize> {
+        &self.retry
+    }
+    pub fn get_timeout(&self) -> &Option<u64> {
+        &self.timeout
+    }
+    pub fn get_auth(&self) -> &Option<def::AuthType> {
+        &self.auth
+    }
+    pub fn get_consumers(&self) -> &Option<Vec<def::Consumer>> {
+        &self.consumers
+    }
+    pub fn get_upstream(&self) -> &Option<Vec<String>> {
+        &self.upstream
+    }
+    pub fn get_routes(&self) -> &Option<Vec<RouteConfig>> {
+        &self.routes
+    }
+}
+
+// route endpoint config
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RouteConfig {
+    // the route or endpoint name
+    pub name: Option<String>,
+    // the list of path for this route
+    pub paths: Option<Vec<String>>,
+    // the list of allowed methods in this route
+    // by default or leaving empty, all method is allowed
+    pub methods: Option<Vec<String>>,
+    // the headers opt for insert and remove
+    pub headers: Option<def::Headers>,
+    // the specified auth strategy for this route
+    pub auth: Option<def::AuthType>,
+    // enables ip restriction and whitelisted only
+    pub ip: Option<def::IpWhitelist>,
+    // the list of allowed consumers for this route
+    pub consumers: Option<Vec<def::Consumer>>,
+}
+
+impl RouteConfig {
+    pub fn get_name(&self) -> &Option<String> {
+        &self.name
+    }
+    pub fn get_paths(&self) -> &Option<Vec<String>> {
+        &self.paths
+    }
+    pub fn get_methods(&self) -> &Option<Vec<String>> {
+        &self.methods
+    }
+    pub fn get_auth(&self) -> &Option<def::AuthType> {
+        &self.auth
+    }
+    pub fn get_consumers(&self) -> &Option<Vec<def::Consumer>> {
+        &self.consumers
+    }
 }
 
 // parse yaml file to configuration based on provided path
-fn load_yaml(file_path: &str) -> Configuration {
+fn load_yaml(file_path: &str) -> SystemConfig {
     let file = File::open(file_path).expect("Unable to find configuration file.");
     serde_yaml::from_reader(file).expect("Unable to parse YAML")
 }
@@ -96,8 +217,8 @@ fn load_yaml(file_path: &str) -> Configuration {
 // our main gateway configuration
 #[derive(Debug)]
 pub struct GatewayConfig {
-    pub clusters: Option<Vec<cluster::ClusterConfig>>,
-    pub consumers: Option<Vec<consumer::Consumer>>,
+    pub clusters: Option<Vec<ClusterConfig>>,
+    pub consumers: Option<Vec<def::Consumer>>,
 }
 
 // load config from yaml and merge to server configuration

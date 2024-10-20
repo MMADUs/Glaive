@@ -98,18 +98,12 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/auth-test"
-    auth:
-      key:
-        allowed:
-          - "lolz"
-          - "ea"
-    rate_limit:
-      global:
-        basic:
-          limit: 10
-#    ip:
-#      whitelist:
-#        - "127.0.0.1"
+    headers:
+      insert:
+        - key: "Test-KEY"
+          value: "some value"
+        - key: "Test-KEY-2"
+          value: "some value 2"
     upstream:
       - "localhost:8000"
       - "localhost:8001"
