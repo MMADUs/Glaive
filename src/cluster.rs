@@ -96,6 +96,8 @@ pub struct ClusterMetadata {
     pub cache_ttl: Option<usize>,
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
+    pub request: Option<def::Request>,
+    pub response: Option<def::Response>,
     pub auth: Option<def::AuthType>,
     pub ip: Option<def::IpWhitelist>,
     pub consumers: Option<Vec<def::Consumer>>,
@@ -127,6 +129,12 @@ impl ClusterMetadata {
     }
     pub fn get_timeout(&self) -> &Option<u64> {
         &self.timeout
+    }
+    pub fn get_request(&self) -> &Option<def::Request> {
+        &self.request
+    }
+    pub fn get_response(&self) -> &Option<def::Response> {
+        &self.response
     }
     pub fn get_auth(&self) -> &Option<def::AuthType> {
         &self.auth
@@ -239,6 +247,8 @@ pub fn build_cluster(
             cache_ttl: cluster_cache_ttl,
             retry: cluster_conf.retry,
             timeout: cluster_conf.timeout,
+            request: cluster_conf.request,
+            response: cluster_conf.response,
             auth: cluster_conf.auth,
             ip: cluster_conf.ip,
             consumers: cluster_conf.consumers,

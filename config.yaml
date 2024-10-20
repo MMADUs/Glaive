@@ -70,12 +70,6 @@ clusters:
         methods:
           - GET
           - POST
-        headers:
-          insert:
-            - key: "header-key"
-              value: "header-value"
-          remove:
-            - key: "header-key"
         consumers:
           - name: "user"
             acl:
@@ -91,6 +85,19 @@ clusters:
 #        limit: 100
 #    retry: 3
 #    timeout: 2000
+    request:
+      headers:
+        remove:
+          - key: "server-name"
+    response:
+      headers:
+        insert:
+          - key: "Test-KEY"
+            value: "some value"
+          - key: "Test-KEY-2"
+            value: "some value 2"
+        remove:
+          - key: "X-Custom-Header"
     upstream:
       - "localhost:8080"
 
@@ -98,12 +105,6 @@ clusters:
     host: "localhost"
     tls: false
     prefix: "/auth-test"
-    headers:
-      insert:
-        - key: "Test-KEY"
-          value: "some value"
-        - key: "Test-KEY-2"
-          value: "some value 2"
     upstream:
       - "localhost:8000"
       - "localhost:8001"

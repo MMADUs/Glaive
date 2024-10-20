@@ -113,8 +113,10 @@ pub struct ClusterConfig {
     // the retry and timout mechanism is provided for connection failures
     pub retry: Option<usize>,
     pub timeout: Option<u64>,
-    // the headers opt for insert and remove
-    pub headers: Option<def::Headers>,
+    // request filter & modification
+    pub request: Option<def::Request>,
+    // response filter & modification
+    pub response: Option<def::Response>,
     // enables ip restriction and whitelisted only
     pub ip: Option<def::IpWhitelist>,
     // the global auth strategy for the service
@@ -180,8 +182,10 @@ pub struct RouteConfig {
     // the list of allowed methods in this route
     // by default or leaving empty, all method is allowed
     pub methods: Option<Vec<String>>,
-    // the headers opt for insert and remove
-    pub headers: Option<def::Headers>,
+    // request filter & modification
+    pub request: Option<def::Request>,
+    // response filter & modification
+    pub response: Option<def::Response>,
     // the specified auth strategy for this route
     pub auth: Option<def::AuthType>,
     // enables ip restriction and whitelisted only

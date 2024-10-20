@@ -18,15 +18,17 @@
  */
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pingora::prelude::{HttpPeer};
 use pingora::proxy::{ProxyHttp, Session};
 use pingora::{Error as PingoraError, Result as PingoraResult, ErrorType};
-use pingora::http::{ResponseHeader};
+use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::cache::{CacheKey, CacheMeta, CachePhase, NoCacheReason, RespCacheable};
 
 use async_trait::async_trait;
+use http::{HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::ClusterMetadata;
@@ -261,19 +263,77 @@ impl ProxyHttp for ProxyRouter {
         Ok(RespCacheable::Cacheable(meta))
     }
 
+    // the request filter used to insert or remove headers from client
+    async fn upstream_request_filter(
+        &self,
+        _session: &mut Session,
+        upstream_request: &mut RequestHeader,
+        ctx: &mut Self::CTX,
+    ) -> PingoraResult<()> {
+        // select the cluster based on the selected index
+        let cluster = &self.clusters[ctx.cluster_address];
+        // check if any request should be filtered
+        if let Some(request) = cluster.get_request() {
+            // check if headers is provided
+            if let Some(headers) = request.get_headers() {
+                // check if there is a header to insert
+                if let Some(insert) = headers.to_be_inserted() {
+                    for insertion in insert {
+                        let header_format = insertion.key.replace(' ', "-");
+                        let header_key = HeaderName::from_str(header_format.as_str()).unwrap();
+                        let header_value = HeaderValue::from_str(&insertion.value).unwrap();
+                        upstream_request.append_header(header_key, header_value)?;
+                    }
+                }
+                // check if there is a header to remove
+                if let Some(remove) = headers.to_be_removed() {
+                    for deletion in remove {
+                        let header_key = deletion.key.replace(' ', "-");
+                        upstream_request.remove_header(&header_key);
+                    }
+                }
+            }
+        }
+        // continue request
+        Ok(())
+    }
+
     // the response filter is responsible for modifying response
     async fn response_filter(
         &self,
         session: &mut Session,
         upstream_response: &mut ResponseHeader,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> PingoraResult<()>
     where
         Self::CTX: Send + Sync,
     {
+        // select the cluster based on the selected index
+        let cluster = &self.clusters[ctx.cluster_address];
+        // check if any response should be filtered
+        if let Some(response) = cluster.get_response() {
+            // check if headers is provided
+            if let Some(headers) = response.get_headers() {
+                // check if there is a header to insert
+                if let Some(insert) = headers.to_be_inserted() {
+                    for insertion in insert {
+                        let header_format = insertion.key.replace(' ', "-");
+                        let header_key = HeaderName::from_str(header_format.as_str()).unwrap();
+                        let header_value = HeaderValue::from_str(&insertion.value).unwrap();
+                        upstream_response.append_header(header_key, header_value)?;
+                    }
+                }
+                // check if there is a header to remove
+                if let Some(remove) = headers.to_be_removed() {
+                    for deletion in remove {
+                        let header_key = deletion.key.replace(' ', "-");
+                        upstream_response.remove_header(&header_key);
+                    }
+                }
+            }
+        }
         // default server identity in headers
         upstream_response.insert_header("Server", "Glaive Gateway")?;
-
         // insert header for cache status
         if session.cache.enabled() {
             match session.cache.phase() {
@@ -290,11 +350,11 @@ impl ProxyHttp for ProxyRouter {
                 _ => upstream_response.insert_header("x-cache-status", "no-cache")?,
             }
         }
-
         // cache lock duration
         if let Some(d) = session.cache.lock_duration() {
             upstream_response.insert_header("x-cache-lock-time-ms", format!("{}", d.as_millis()))?
         }
+        // continue response
         Ok(())
     }
 

@@ -200,45 +200,54 @@ struct RedisLimiter {}
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Headers {
     // used for storing a list headers data to be inserted
-    pub insert: Vec<InsertHeader>,
+    pub insert: Option<Vec<InsertHeader>>,
     // used for removing a list of headers
-    pub remove: Vec<RemoveHeader>,
+    pub remove: Option<Vec<RemoveHeader>>,
 }
 
 impl Headers {
-    pub fn to_be_inserted(&self) -> &Vec<InsertHeader> {
+    pub fn to_be_inserted(&self) -> &Option<Vec<InsertHeader>> {
         &self.insert
     }
-    pub fn to_be_removed(&self) -> &Vec<RemoveHeader> {
+    pub fn to_be_removed(&self) -> &Option<Vec<RemoveHeader>> {
         &self.remove
     }
 }
 
 // insert header config
 #[derive(Debug, Deserialize, Serialize)]
-struct InsertHeader {
+pub struct InsertHeader {
     // header key
     pub key: String,
     // header value
     pub value: String,
 }
 
-impl InsertHeader {
-    pub fn insert_header(&self) {
-        let key = self.key.clone();
-        let value = self.value.clone();
-    }
-}
-
 // remove header config
 #[derive(Debug, Deserialize, Serialize)]
-struct RemoveHeader {
+pub struct RemoveHeader {
     // header key
     pub key: String,
 }
 
-impl RemoveHeader {
-    pub fn remove_header(&self) {
-        let key = self.key.clone();
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Request {
+    pub headers: Option<Headers>,
+}
+
+impl Request {
+    pub fn get_headers(&self) -> &Option<Headers> {
+        &self.headers
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Response {
+    pub headers: Option<Headers>,
+}
+
+impl Response {
+    pub fn get_headers(&self) -> &Option<Headers> {
+        &self.headers
     }
 }
