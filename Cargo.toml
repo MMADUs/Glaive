@@ -24,3 +24,4 @@ rs-consul = "0.7.0"
 tokio = { version = "1.40.0", features = ["full"] }
 scc = { version = "2.0.19", features = ["serde"] }
 ahash = "0.8.11"
+redis = "0.27.5"

@@ -31,6 +31,7 @@ mod path;
 mod proxy;
 mod request;
 mod response;
+mod redis;
 
 use std::env;
 
