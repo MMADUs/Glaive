@@ -1,9 +1,16 @@
-# Glaive - Gateway for Cloud Native
+![Glaive Diagram Image](./asset/glaive_logo.png)
 
-Glaive in an API Gateway built on top of Pingora. Aims for simplicity, performance, and security.
+# About Glaive
+
+Glaive in an API Gateway written in Rust, this is a gateway service that will fulfill your needs, it provides a simple configuration and some built in plugins to work with.
+We aim the system to work perfectly and providing robust performance, resource usage, and security within a very simple configuration.
 
 > [!WARNING]
 > This project is a work-in-progress.
+
+# Architecture Overview
+
+Glaive capable of handling a bunch of systems in the backdoor from the outer world, it is capable of handling a static web, services, LLMs & more.
 
 ![Glaive Diagram Image](./asset/glaive_diagram.png)
 
