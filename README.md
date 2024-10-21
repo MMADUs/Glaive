@@ -14,57 +14,21 @@ Glaive capable of handling a bunch of systems in the backdoor from the outer wor
 
 ![Glaive Diagram Image](./asset/glaive_diagram.png)
 
-# Glaive key Features
+# Feature Highlights
 
-This is currently the plan for future key features to be implemented.
+* Support TLS over OpenSSL
+* Support various of request: REST, gRPC, WebSocket, etc.
+* Provide a simple & robust configurations.
+* Built in with various plugins: Cache, Observability, Kubernetes, etc.
 
-- [x] Reverse Proxy
-- [x] Load Balancer
-- [ ] Load Balancer (Advanced)
-- [ ] Serve Static Files
-- [x] Upstream Healthcheck
-- [x] YAML Configuration (DB-less Mode)
-- [ ] DB-Mode with MongoDB
-- [x] Dynamic Routing
-- [x] Endpoint Configuration
-- [x] Retry Mechanism
-- [x] Request Timeout
-- [ ] Redis Support
-- [x] Rate Limiter
-- [ ] Rate Limiter (Advanced)
-- [ ] Request & Response Header Modification
-- [ ] CORS Policy
-- [ ] Circuit Breaking
-- [ ] Request Size Limiter
-- [x] Key Authentication
-- [x] Basic Token Authentication
-- [ ] Advanced Token Authentication
-- [ ] Built in external Authentication
-- [x] Authorization
-- [x] Consumer ACL
-- [x] IP Restriction
-- [ ] OAuth 2.0 Authentication
-- [x] Consul Discovery
-- [ ] DNS Discovery
-- [ ] K8S Discovery
-- [ ] Advanced Logging
-- [ ] Metrics with Prometheus
-- [ ] API Documentation
-- [ ] Vault Configuration
-- [x] ENV Configuration
-- [ ] TLS/SSL Termination
-- [x] Caching Layer
-- [ ] Caching Layer (Advanced)
-- [ ] Open Telemetry
-- [ ] gRPC Proxy
-- [ ] gRPC Transformation
-- [ ] Kafka Transformation
-- [ ] Kafka Logging
-- [ ] Async HTTP Logging
-- [ ] Logstash Logging
-- [ ] WebSocket Proxy
-- [ ] HTTP1 & HTTP2 Support
-- [ ] GraphQL Proxy
-- [ ] Kubernetes ingress controller
-- [ ] Zipkin Tracing
-- [ ] Fault Tolerance
+# System & Build Requirement
+
+* Current Rust version: rustc 1.75.0
+* Currently, it's only for Linux / Docker as alternative
+* Make sure that [Perl 5] is installed on your system for OpenSSL
+
+[Perl 5]:https://www.perl.org/
+
+# Getting Started
+
+> coming soon
