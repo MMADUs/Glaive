@@ -51,8 +51,8 @@ clusters:
 #        allowed:
 #          - "secret"
 #          - "key1"
-      jwt:
-        secret: "your-secret-key"
+#     jwt:
+#       secret: "your-secret-key"
     consumers:
       - name: "user"
         acl:

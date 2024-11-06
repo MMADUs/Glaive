@@ -39,14 +39,14 @@ impl RedisClient {
         &mut self,
         key: &str,
         value: &str,
-        ttl_seconds: usize,
+        ttl_seconds: u64,
     ) -> Result<(), RedisError> {
         self.client.set_ex(key, value, ttl_seconds)?; // Set key with TTL
         Ok(())
     }
 
     // Get cache value
-    pub fn get_cache(&self, key: &str) -> Result<Option<String>, RedisError> {
+    pub fn get_cache(&mut self, key: &str) -> Result<Option<String>, RedisError> {
         let result: Option<String> = self.client.get(key)?;
         Ok(result)
     }

@@ -23,6 +23,7 @@ use std::net::{Ipv4Addr, SocketAddr as StdSocketAddr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use http::Extensions;
 use pingora::lb::discovery::ServiceDiscovery;
 use pingora::lb::{Backend, Backends, LoadBalancer};
 use pingora::prelude::{background_service, Result as PingoraResult, RoundRobin, TcpHealthCheck};
@@ -195,6 +196,7 @@ impl ConsulServiceDiscovery {
             .map(|socket_address| Backend {
                 addr: socket_address,
                 weight: 1,
+                ext: Extensions::new(),
             })
             .collect();
         // return all discovered backends
