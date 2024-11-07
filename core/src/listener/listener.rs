@@ -3,7 +3,7 @@ use tokio::{
     net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 
-// Generic trait for our streams
+// generic trait for dynamic streams
 trait StreamExt: AsyncRead + AsyncWrite + Unpin + Send {
     fn split(self) -> (io::ReadHalf<Self>, io::WriteHalf<Self>)
     where
@@ -13,7 +13,7 @@ trait StreamExt: AsyncRead + AsyncWrite + Unpin + Send {
     }
 }
 
-// Blanket implementation for TcpStream and UnixStream
+// implementation for TcpStream and UnixStream
 impl StreamExt for TcpStream {}
 impl StreamExt for UnixStream {}
 
@@ -66,7 +66,7 @@ impl Listener {
                     println!("new tcp connection accepted");
                     tokio::spawn(async move {
                         // handle here
-                        if let Err(e) = handle_connection(downstream).await {
+                        if let Err(e) = Self::handle_connection(downstream).await {
                             println!("tcp handler error: {}", e);
                         }
                     });
@@ -93,7 +93,7 @@ impl Listener {
                     println!("new uds connection accepted");
                     tokio::spawn(async move {
                         // handle here
-                        if let Err(e) = handle_connection(downstream).await {
+                        if let Err(e) = Self::handle_connection(downstream).await {
                             println!("uds handle error: {}", e);
                         }
                     });
@@ -104,27 +104,27 @@ impl Listener {
             };
         }
     }
-}
 
-async fn handle_connection<S>(_downstream: S) -> io::Result<()>
-where
-    S: StreamExt,
-{
-    // let upstream = TcpStream::connect(&upstream_addr).await?;
-    //
-    // let (mut downstream_read, mut downstream_write) = downstream.split();
-    // let (mut upstream_read, mut upstream_write) = upstream.split();
-    //
-    // let client_to_upstream = async {
-    //     io::copy(&mut downstream_read, &mut upstream_write).await?;
-    //     upstream_write.shutdown().await
-    // };
-    //
-    // let upstream_to_client = async {
-    //     io::copy(&mut upstream_read, &mut downstream_write).await?;
-    //     downstream_write.shutdown().await
-    // };
-    //
-    // tokio::try_join!(client_to_upstream, upstream_to_client)?;
-    Ok(())
+    async fn handle_connection<S>(_downstream: S) -> io::Result<()>
+    where
+        S: StreamExt,
+    {
+        // let upstream = TcpStream::connect(&upstream_addr).await?;
+        //
+        // let (mut downstream_read, mut downstream_write) = downstream.split();
+        // let (mut upstream_read, mut upstream_write) = upstream.split();
+        //
+        // let client_to_upstream = async {
+        //     io::copy(&mut downstream_read, &mut upstream_write).await?;
+        //     upstream_write.shutdown().await
+        // };
+        //
+        // let upstream_to_client = async {
+        //     io::copy(&mut upstream_read, &mut downstream_write).await?;
+        //     downstream_write.shutdown().await
+        // };
+        //
+        // tokio::try_join!(client_to_upstream, upstream_to_client)?;
+        Ok(())
+    }
 }
