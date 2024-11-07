@@ -1,8 +1,10 @@
 use tokio::runtime::{Builder, Handle};
 use tokio::signal::unix;
 
-use crate::listener::listener::Listener;
+use crate::service::service::{Service, ServiceType};
 
+// just a tokio runtime builder
+// used for multithreaded and work stealing configs
 pub struct Runtime {
     runtime: tokio::runtime::Runtime,
 }
@@ -16,7 +18,7 @@ impl Runtime {
             .thread_name(thread_name)
             .build()
             .unwrap();
-        Runtime{
+        Runtime {
             runtime: built_runtime,
         }
     }
@@ -26,26 +28,33 @@ impl Runtime {
     }
 }
 
+// shutdown types
 enum ShutdownType {
     Graceful,
     Fast,
 }
 
-pub struct Server {
-    services: Vec<Listener>,
+// the main server instance
+// the server can held many services
+pub struct Server<A> {
+    services: Vec<Service<A>>,
 }
 
-impl Server {
+impl<A: ServiceType + Send + Sync + 'static> Server<A> {
+    // new server
     pub fn new() -> Self {
-        Server{
+        Server {
             services: Vec::new(),
         }
     }
 
-    pub fn add_service(&mut self, service: Listener) {
+    // add each service
+    pub fn add_service(&mut self, service: Service<A>) {
         self.services.push(service);
     }
 
+    // this is the method that is used to run the server
+    // forever
     pub fn run_forever(&mut self) {
         let mut runtimes: Vec<Runtime> = Vec::new();
         while let Some(service) = self.services.pop() {
@@ -58,7 +67,7 @@ impl Server {
         let main_runtime = Runtime::new("main-runtime", 1);
         let shutdown_type = main_runtime.handle_work().block_on(
             // this block forever until the entire program exit
-            self.run_server(),
+            Self::run_server(),
         );
         match shutdown_type {
             ShutdownType::Graceful => println!("shutdown gracefully"),
@@ -66,17 +75,22 @@ impl Server {
         }
     }
 
-    fn run_service(service: Listener, alloc_threads: usize) -> Runtime {
+    // used for running every service
+    // that was added to the server
+    fn run_service(service: Service<A>, alloc_threads: usize) -> Runtime {
         // run each listener service on top of the runtime
         let runtime = Runtime::new("runtime", alloc_threads);
+        let address_stack = service.get_address_stack();
         runtime.handle_work().spawn(async move {
             // run the async service here
-            let _ = service.listen().await;
+            Service::start_service(address_stack, service).await;
         });
         runtime
     }
 
-    async fn run_server(&self) -> ShutdownType {
+    // this is the where main process will be blocked
+    // the function wait for an exit process signal
+    async fn run_server() -> ShutdownType {
         // waiting for exit signal
         let mut graceful_upgrade_signal = unix::signal(unix::SignalKind::quit()).unwrap();
         let mut graceful_terminate_signal = unix::signal(unix::SignalKind::terminate()).unwrap();

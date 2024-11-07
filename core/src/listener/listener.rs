@@ -1,10 +1,19 @@
+use std::net::{SocketAddr as StdSocketAddr, SocketAddrV4, SocketAddrV6};
+use tokio::net::unix::SocketAddr as UnixSocketAddr;
 use tokio::{
     io::{self, AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 
-// generic trait for dynamic streams
-trait StreamExt: AsyncRead + AsyncWrite + Unpin + Send {
+// generic stuff to make the accept implementation working somehow
+pub trait DynSocketAddr: Send + Sync {}
+
+#[cfg(unix)]
+impl DynSocketAddr for UnixSocketAddr {}
+impl DynSocketAddr for SocketAddrV4 {}
+impl DynSocketAddr for SocketAddrV6 {}
+
+pub trait DynStream: AsyncRead + AsyncWrite + Unpin + Send + Sync {
     fn split(self) -> (io::ReadHalf<Self>, io::WriteHalf<Self>)
     where
         Self: Sized,
@@ -13,118 +22,112 @@ trait StreamExt: AsyncRead + AsyncWrite + Unpin + Send {
     }
 }
 
-// implementation for TcpStream and UnixStream
-impl StreamExt for TcpStream {}
-impl StreamExt for UnixStream {}
+impl DynStream for TcpStream {}
+impl DynStream for UnixStream {}
 
+pub type Stream = Box<dyn DynStream>;
+pub type Socket = Box<dyn DynSocketAddr>;
+
+// the main listener type
+// the listener is returned right after binding connection stream
+// any implementation here is used for any event after connection established
 #[derive(Debug)]
-enum ListenerType {
-    TCP,
-    UDS,
+pub enum Listener {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix(UnixListener),
 }
 
-#[derive(Debug)]
-pub struct Listener {
-    listener_type: ListenerType,
-    address: String,
+impl From<TcpListener> for Listener {
+    fn from(s: TcpListener) -> Self {
+        Self::Tcp(s)
+    }
+}
+
+#[cfg(unix)]
+impl From<UnixListener> for Listener {
+    fn from(s: UnixListener) -> Self {
+        Self::Unix(s)
+    }
 }
 
 impl Listener {
-    pub fn new_tcp(addr: &str) -> Self {
-        Listener {
-            listener_type: ListenerType::TCP,
-            address: addr.to_string(),
-        }
-    }
-
-    pub fn new_uds(addr: &str) -> Self {
-        Listener {
-            listener_type: ListenerType::UDS,
-            address: addr.to_string(),
-        }
-    }
-
-    pub async fn listen(&self) -> io::Result<()> {
-        match self.listener_type {
-            ListenerType::TCP => self.tcp_listener().await,
-            ListenerType::UDS => self.uds_listener().await,
-        }
-    }
-
-    async fn tcp_listener(&self) -> io::Result<()> {
-        let listener = TcpListener::bind(&self.address).await?;
-        println!("TCP Listening on address: {}", &self.address);
-        // began infinite loop
-        // accepting incoming connections
-        loop {
-            let new_io = tokio::select! {
-                new_io = listener.accept() => new_io,
-                // shutdown signal here to break loop
-            };
-            match new_io {
-                Ok((downstream, _addr)) => {
-                    println!("new tcp connection accepted");
-                    tokio::spawn(async move {
-                        // handle here
-                        if let Err(e) = Self::handle_connection(downstream).await {
-                            println!("tcp handler error: {}", e);
-                        }
-                    });
+    // used for accepting connection stream
+    // since it contains tcp and udp, its better to seperate this
+    pub async fn accept_stream(&self) -> Result<(Stream, Socket), ()> {
+        match self {
+            Self::Tcp(tcp_listener) => match tcp_listener.accept().await {
+                Ok((tcp_downstream, socket_addr)) => {
+                    let socket_address: Socket = match socket_addr {
+                        StdSocketAddr::V4(addr) => Box::new(addr),
+                        StdSocketAddr::V6(addr) => Box::new(addr),
+                    };
+                    Ok((Box::new(tcp_downstream) as Stream, socket_address))
                 }
                 Err(e) => {
-                    println!("failed to accept tcp connection: {}", e);
+                    println!("unable to accept downstream connection: {}", e);
+                    Err(())
                 }
-            };
-        }
-    }
-
-    async fn uds_listener(&self) -> io::Result<()> {
-        let listener = UnixListener::bind(&self.address)?;
-        println!("UDS Listening on socket: {}", &self.address);
-        // began infinite loop
-        // accepting incoming connections
-        loop {
-            let new_io = tokio::select! {
-                new_io = listener.accept() => new_io,
-                // shutdown signal here to break loop
-            };
-            match new_io {
-                Ok((downstream, _addr)) => {
-                    println!("new uds connection accepted");
-                    tokio::spawn(async move {
-                        // handle here
-                        if let Err(e) = Self::handle_connection(downstream).await {
-                            println!("uds handle error: {}", e);
-                        }
-                    });
+            },
+            Self::Unix(unix_listener) => match unix_listener.accept().await {
+                Ok((unix_downstream, socket_addr)) => {
+                    let socket_address: Socket = Box::new(socket_addr);
+                    Ok((Box::new(unix_downstream) as Stream, socket_address))
                 }
                 Err(e) => {
-                    println!("failed to accept uds connection: {}", e);
+                    print!("unable to accept downstream connection: {}", e);
+                    Err(())
                 }
-            };
+            },
+        }
+    }
+}
+
+// listener address is a choice
+// wether to use tcp or unix, and will be bind by the implementation
+#[derive(Clone)]
+pub enum ListenerAddress {
+    Tcp(String),
+    Unix(String),
+}
+
+impl ListenerAddress {
+    pub async fn bind_to_listener(&self) -> Listener {
+        match self {
+            Self::Tcp(address) => TcpListener::bind(address)
+                .await
+                .map(Listener::from)
+                .unwrap_or_else(|e| panic!("{}", e)),
+            #[cfg(unix)]
+            Self::Unix(path) => UnixListener::bind(path)
+                .map(Listener::from)
+                .unwrap_or_else(|e| panic!("{}", e)),
+        }
+    }
+}
+
+// the network stack is used for network configurations
+// this held many network for 1 service
+pub struct NetworkStack {
+    pub address_stack: Vec<ListenerAddress>,
+}
+
+impl NetworkStack {
+    pub fn new() -> Self {
+        NetworkStack {
+            address_stack: Vec::new(),
         }
     }
 
-    async fn handle_connection<S>(_downstream: S) -> io::Result<()>
-    where
-        S: StreamExt,
-    {
-        // let upstream = TcpStream::connect(&upstream_addr).await?;
-        //
-        // let (mut downstream_read, mut downstream_write) = downstream.split();
-        // let (mut upstream_read, mut upstream_write) = upstream.split();
-        //
-        // let client_to_upstream = async {
-        //     io::copy(&mut downstream_read, &mut upstream_write).await?;
-        //     upstream_write.shutdown().await
-        // };
-        //
-        // let upstream_to_client = async {
-        //     io::copy(&mut upstream_read, &mut downstream_write).await?;
-        //     downstream_write.shutdown().await
-        // };
-        //
-        // tokio::try_join!(client_to_upstream, upstream_to_client)?;
-        Ok(())
+    // add tcp address to network list
+    pub fn new_tcp_address(&mut self, addr: &str) {
+        let tcp_address = ListenerAddress::Tcp(addr.to_string());
+        self.address_stack.push(tcp_address);
+    }
+
+    // add unix socket path to network list
+    pub fn new_unix_path(&mut self, path: &str) {
+        let unix_path = ListenerAddress::Unix(path.to_string());
+        self.address_stack.push(unix_path);
     }
 }

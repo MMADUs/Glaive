@@ -1,12 +1,31 @@
 use core::add;
 
+struct Service1 {
+    name: String,
+}
+
+impl Service1 {
+    fn new(name: &str) -> Self {
+        Service1 {
+            name: name.to_string(),
+        }
+    }
+}
+
+impl core::service::service::ServiceType for Service1 {
+    fn say_hi(&self) -> String {
+        println!("my name is: {}", &self.name);
+        self.name.clone()
+    }
+}
+
 fn main() {
     println!("Hello, world!");
     println!("2 + 2 is: {}", add(2, 2));
+    let mut service1 = core::service::service::Service::new("service-1", Service1::new("athaya"));
+    service1.add_tcp_network("127.0.0.1:8500");
+    service1.add_tcp_network("127.0.0.1:8600");
     let mut server = core::server::server::Server::new();
-    let service1 = core::listener::listener::Listener::new_tcp("127.0.0.1:8500");
-    let service2 = core::listener::listener::Listener::new_tcp("127.0.0.1:8600");
     server.add_service(service1);
-    server.add_service(service2);
     server.run_forever();
 }
