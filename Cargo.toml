@@ -1,1 +1,7 @@
-workspace = { members = ["glaive"] }
+[workspace]
+members = [
+  "glaive",
+  "core",
+  "bin",
+  # add more as packages grow
+]
