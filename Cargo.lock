@@ -322,7 +322,11 @@ dependencies = [
 name = "core"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-queue",
  "futures",
+ "lru",
+ "parking_lot",
+ "thread_local",
  "tokio",
 ]
 
