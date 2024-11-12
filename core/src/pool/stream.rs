@@ -9,13 +9,11 @@ use ahash::AHasher;
 
 use super::pool::ConnectionMetadata;
 
-#[derive(Clone)]
 enum PeerNetwork {
     Tcp(String, usize),
     Unix(String),
 }
 
-#[derive(Clone)]
 pub struct UpstreamPeer {
     name: String,
     service: String,
@@ -31,6 +29,7 @@ impl UpstreamPeer {
     }
 }
 
+// hash implementation to generate connection peer id
 impl Hash for UpstreamPeer {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
         self.name.hash(hasher);
@@ -52,12 +51,16 @@ impl Hash for UpstreamPeer {
     }
 }
 
+// the stream manager is used as the bridge from request lifetime to connection pool
+// used to managing socket stream connection
 pub struct StreamManager {
     connection_pool: Arc<ConnectionPool<Arc<Mutex<Stream>>>>,
 }
 
 const DEFAULT_POOL_SIZE: usize = 128;
 
+// PUBLIC METHODS
+// stream manager implementation
 impl StreamManager {
     pub fn new(pool_size: Option<usize>) -> Self {
         StreamManager {
@@ -74,9 +77,13 @@ impl StreamManager {
     }
 }
 
+// PRIVATE METHODS
+// stream manager implementation
 impl StreamManager {
-    async fn new_stream_connection(&self, peer: UpstreamPeer) -> Result<Stream, ()> {
-        let stream = match peer.network {
+    // used to make a new socket connection to upstream peer
+    // returns the connection stream
+    async fn new_stream_connection(&self, peer: &UpstreamPeer) -> Result<Stream, ()> {
+        let stream = match &peer.network {
             PeerNetwork::Tcp(address, port) => {
                 let tcp_address = format!("{}:{}", address, port);
                 match TcpStream::connect(tcp_address).await {
@@ -100,7 +107,9 @@ impl StreamManager {
         Ok(stream)
     }
 
-    async fn find_connection_stream(&self, peer: UpstreamPeer) -> Option<Stream> {
+    // used to find a connection from the connection pool
+    // returns some stream, there likely a chance stream does not exist
+    async fn find_connection_stream(&self, peer: &UpstreamPeer) -> Option<Stream> {
         // get the peer connection group id
         let connection_group_id = peer.gen_peer_id();
         // find connection if exist
@@ -113,8 +122,9 @@ impl StreamManager {
                 // unwrapping the arc wrapper
                 match Arc::try_unwrap(wrapped_stream) {
                     Ok(stream) => {
-                        let tes: Stream = stream.into_inner();
-                        Some(tes)
+                        // unwrap the mutex
+                        let connection_stream: Stream = stream.into_inner();
+                        Some(connection_stream)
                     },
                     Err(_) => None,
                 }
@@ -123,14 +133,20 @@ impl StreamManager {
         }
     }
 
+    // used to get the stream connection
+    // this is the function that is going to be called during request
+    // find a connection in pool, if does not exist, create a new socket connection
+    // returns the stream and the bool to determine if the connection is new or reused.
     async fn get_stream_connection(&self, peer: UpstreamPeer) -> Result<(Stream, bool), ()> {
-        let reused_connection = self.find_connection_stream(peer.clone()).await;
+        // find connection from pool
+        let reused_connection = self.find_connection_stream(&peer).await;
         match reused_connection {
             Some(stream_connection) => {
                 return Ok((stream_connection, true))
             },
             None => {
-                let new_stream_connection = self.new_stream_connection(peer.clone()).await;
+                // new socket connection
+                let new_stream_connection = self.new_stream_connection(&peer).await;
                 match new_stream_connection {
                     Ok(stream_connection) => {
                         return Ok((stream_connection, false))
@@ -141,11 +157,19 @@ impl StreamManager {
         }
     }
 
+    // used to return used connection after request finished
+    // returns nothing
     async fn return_stream_connection(&self, connection: Stream, peer: UpstreamPeer) {
-        let new_metadata = ConnectionMetadata::new(100, 101);
+        // generate new metadata
+        let new_group_id = peer.gen_peer_id();
+        // TODO: replace 101 (unique id) as file descriptor (fd)
+        let new_metadata = ConnectionMetadata::new(new_group_id, 101);
+        // wrapping connection and store it to pool
         let connection_stream = Arc::new(Mutex::new(connection));
-        let (closed_connection_notifier, connection_pickup_notification) = self.connection_pool.open_connection(&new_metadata, connection_stream);
+        let (closed_connection_notifier, connection_pickup_notification) = self.connection_pool.add_connection(&new_metadata, connection_stream);
         let pool = Arc::clone(&self.connection_pool);
+        // if the peer provides an idle timeout
+        // the returned idle connection will be removed when time exceeded
         if let Some(timeout) = peer.connection_timeout {
             let timeout_duration = Duration::from_secs(timeout as u64);
             tokio::spawn(async move {

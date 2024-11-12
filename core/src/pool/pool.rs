@@ -19,7 +19,7 @@ type ConnectionGroupID = u64;
 // connection metadata is used to store connection information
 #[derive(Clone)]
 pub struct ConnectionMetadata {
-    // determine on which connection group this belongs to
+    // determine on which connection peer this belongs to
     pub group_id: ConnectionGroupID,
     // unique id for every connection
     pub unique_id: ConnectionID,
@@ -187,12 +187,12 @@ impl<S> ConnectionPool<S> {
     // this method returns 2 notifier
     // 1. the closed connection notifier
     // 2. the picked up connection notifier
-    pub fn open_connection(
+    pub fn add_connection(
         &self,
         metadata: &ConnectionMetadata,
         connection: S,
     ) -> (Arc<Notify>, oneshot::Receiver<bool>) {
-        self.register_connection_to_pool(metadata, connection)
+        self.add_connection_to_pool(metadata, connection)
     }
 
     // used to find a connection in pool with the given connection group id
@@ -343,7 +343,7 @@ impl<S> ConnectionPool<S> {
     // insert both to connection pool and lru
     // 1. the closed connection notifier
     // 2. the picked up connection notifier
-    fn register_connection_to_pool(
+    fn add_connection_to_pool(
         &self,
         metadata: &ConnectionMetadata,
         connection: S,
