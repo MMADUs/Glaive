@@ -2,6 +2,7 @@ pub mod listener;
 pub mod server;
 pub mod service;
 pub mod pool;
+pub mod stream;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
