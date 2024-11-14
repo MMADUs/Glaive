@@ -1,11 +1,9 @@
 use std::net::{SocketAddr as StdSocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
-use std::os::unix::io::{AsRawFd, RawFd};
 use tokio::net::unix::SocketAddr as UnixSocketAddr;
 use tokio::net::TcpSocket;
-use tokio::{
-    io::{self, AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream, UnixListener, UnixStream},
-};
+use tokio::net::{TcpListener, UnixListener};
+
+use crate::stream::{stream::Stream, types::StreamType};
 
 // generic stuff to make the accept implementation working somehow
 pub trait DynSocketAddr: Send + Sync {}
@@ -15,19 +13,6 @@ impl DynSocketAddr for UnixSocketAddr {}
 impl DynSocketAddr for SocketAddrV4 {}
 impl DynSocketAddr for SocketAddrV6 {}
 
-pub trait DynStream: AsyncRead + AsyncWrite + Unpin + Send + Sync {
-    fn split(self) -> (io::ReadHalf<Self>, io::WriteHalf<Self>)
-    where
-        Self: Sized,
-    {
-        io::split(self)
-    }
-}
-
-impl DynStream for TcpStream {}
-impl DynStream for UnixStream {}
-
-pub type Stream = Box<dyn DynStream>;
 pub type Socket = Box<dyn DynSocketAddr>;
 
 // the main listener type
@@ -36,7 +21,6 @@ pub type Socket = Box<dyn DynSocketAddr>;
 #[derive(Debug)]
 pub enum Listener {
     Tcp(TcpListener),
-    #[cfg(unix)]
     Unix(UnixListener),
 }
 
@@ -46,7 +30,6 @@ impl From<TcpListener> for Listener {
     }
 }
 
-#[cfg(unix)]
 impl From<UnixListener> for Listener {
     fn from(s: UnixListener) -> Self {
         Self::Unix(s)
@@ -64,7 +47,10 @@ impl Listener {
                         StdSocketAddr::V4(addr) => Box::new(addr),
                         StdSocketAddr::V6(addr) => Box::new(addr),
                     };
-                    Ok((Box::new(tcp_downstream) as Stream, socket_address))
+                    // parsing tcp stream to dynamic stream concrete type
+                    let stream_type = StreamType::from(tcp_downstream);
+                    let dyn_stream_type: Stream = Box::new(stream_type);
+                    Ok((dyn_stream_type, socket_address))
                 }
                 Err(e) => {
                     println!("unable to accept downstream connection: {}", e);
@@ -74,7 +60,10 @@ impl Listener {
             Self::Unix(unix_listener) => match unix_listener.accept().await {
                 Ok((unix_downstream, socket_addr)) => {
                     let socket_address: Socket = Box::new(socket_addr);
-                    Ok((Box::new(unix_downstream) as Stream, socket_address))
+                    // parsing unix stream to dynamic stream concrete type
+                    let stream_type = StreamType::from(unix_downstream);
+                    let dyn_stream_type: Stream = Box::new(stream_type);
+                    Ok((dyn_stream_type, socket_address))
                 }
                 Err(e) => {
                     print!("unable to accept downstream connection: {}", e);
@@ -132,7 +121,6 @@ impl ListenerAddress {
                     .map(Listener::from)
                     .unwrap_or_else(|e| panic!("{}", e))
             }
-            #[cfg(unix)]
             Self::Unix(path) => {
                 // remove existing socket path
                 match std::fs::remove_file(path) {
@@ -171,6 +159,7 @@ pub struct NetworkStack {
 }
 
 impl NetworkStack {
+    // new network stack
     pub fn new() -> Self {
         NetworkStack {
             address_stack: Vec::new(),

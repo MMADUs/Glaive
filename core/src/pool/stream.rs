@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use crate::pool::pool::ConnectionPool;
-use crate::listener::listener::{Stream};
+use crate::stream::{stream::Stream, types::StreamType};
 use tokio::sync::Mutex;
 use tokio::net::{TcpStream, UnixStream};
 use ahash::AHasher;
 
-use super::pool::ConnectionMetadata;
+use super::pool::{ConnectionMetadata, ConnectionGroupID};
 
 enum PeerNetwork {
     Tcp(String, usize),
@@ -22,7 +22,7 @@ pub struct UpstreamPeer {
 }
 
 impl UpstreamPeer {
-    fn gen_peer_id(&self) -> u64 {
+    fn get_group_id(&self) -> ConnectionGroupID {
         let mut hasher = AHasher::default();
         self.hash(&mut hasher);
         hasher.finish()
@@ -88,8 +88,9 @@ impl StreamManager {
                 let tcp_address = format!("{}:{}", address, port);
                 match TcpStream::connect(tcp_address).await {
                     Ok(tcp_stream) => {
-                        let stream: Stream = Box::new(tcp_stream);
-                        stream
+                        let stream_type = StreamType::from(tcp_stream);
+                        let dyn_stream_type: Stream = Box::new(stream_type);
+                        dyn_stream_type
                     },
                     Err(_) => return Err(()),
                 }
@@ -97,8 +98,9 @@ impl StreamManager {
             PeerNetwork::Unix(socket_path) => {
                 match UnixStream::connect(socket_path).await {
                     Ok(unix_stream) => {
-                        let stream: Stream = Box::new(unix_stream);
-                        stream
+                        let stream_type = StreamType::from(unix_stream);
+                        let dyn_stream_type: Stream = Box::new(stream_type);
+                        dyn_stream_type
                     },
                     Err(_) => return Err(()),
                 }
@@ -111,7 +113,7 @@ impl StreamManager {
     // returns some stream, there likely a chance stream does not exist
     async fn find_connection_stream(&self, peer: &UpstreamPeer) -> Option<Stream> {
         // get the peer connection group id
-        let connection_group_id = peer.gen_peer_id();
+        let connection_group_id = peer.get_group_id();
         // find connection if exist
         match self.connection_pool.find_connection(connection_group_id) {
             Some(wrapped_stream) => {
@@ -161,19 +163,19 @@ impl StreamManager {
     // returns nothing
     async fn return_stream_connection(&self, connection: Stream, peer: UpstreamPeer) {
         // generate new metadata
-        let new_group_id = peer.gen_peer_id();
-        // TODO: replace 101 (unique id) as file descriptor (fd)
-        let new_metadata = ConnectionMetadata::new(new_group_id, 101);
+        let group_id = peer.get_group_id();
+        let unique_id = connection.get_unique_id();
+        let metadata = ConnectionMetadata::new(group_id, unique_id);
         // wrapping connection and store it to pool
         let connection_stream = Arc::new(Mutex::new(connection));
-        let (closed_connection_notifier, connection_pickup_notification) = self.connection_pool.add_connection(&new_metadata, connection_stream);
+        let (closed_connection_notifier, connection_pickup_notification) = self.connection_pool.add_connection(&metadata, connection_stream);
         let pool = Arc::clone(&self.connection_pool);
         // if the peer provides an idle timeout
         // the returned idle connection will be removed when time exceeded
         if let Some(timeout) = peer.connection_timeout {
             let timeout_duration = Duration::from_secs(timeout as u64);
             tokio::spawn(async move {
-                pool.connection_idle_timeout(&new_metadata, timeout_duration, closed_connection_notifier, connection_pickup_notification).await;
+                pool.connection_idle_timeout(&metadata, timeout_duration, closed_connection_notifier, connection_pickup_notification).await;
             });
         }
     }

@@ -1,4 +1,5 @@
-use crate::listener::listener::{ListenerAddress, NetworkStack, Socket, Stream};
+use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
+use crate::stream::stream::Stream;
 use futures::future;
 use std::sync::Arc;
 use tokio::io::{self};
@@ -119,4 +120,3 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
         Ok(())
     }
 }
-

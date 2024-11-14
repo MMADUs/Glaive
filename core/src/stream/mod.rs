@@ -1,5 +1,5 @@
 pub mod raw;
 pub mod stream;
-pub mod implement;
-pub mod wrapper;
+pub mod types;
 pub mod traits;
+pub mod duration;

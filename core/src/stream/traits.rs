@@ -1,3 +1,5 @@
+use crate::pool::pool::ConnectionID;
+
 pub trait UniqueID {
-    fn id(&self) -> i32;
+    fn get_unique_id(&self) -> ConnectionID;
 }

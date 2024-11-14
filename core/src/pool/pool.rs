@@ -9,12 +9,12 @@ use tokio::sync::{oneshot, Notify};
 // used for every connection
 // every connection have their own unique id
 // used for network pooling
-type ConnectionID = usize;
+pub type ConnectionID = i32;
 
 // used for a group of connection
 // the connection group id can held many connection unique id
 // used for service pooling
-type ConnectionGroupID = u64;
+pub type ConnectionGroupID = u64;
 
 // connection metadata is used to store connection information
 #[derive(Clone)]
