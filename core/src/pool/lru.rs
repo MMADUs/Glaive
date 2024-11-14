@@ -1,7 +1,7 @@
 use std::cell::RefCell;
+use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;
-use std::hash::Hash;
 
 use lru::LruCache;
 use parking_lot::RwLock;
@@ -70,8 +70,8 @@ where
     // add a new connection to the lru
     // the new connection will create a new node for the metadata
     pub fn add_new_connection(
-        &self, 
-        connection_unique_id: U, 
+        &self,
+        connection_unique_id: U,
         connection_metadata: M,
     ) -> (Arc<Notify>, Option<M>) {
         // create new node with metadata
@@ -86,7 +86,11 @@ where
 
     // insert a node in and return the meta of the replaced node
     // any node with existed key in lru, will be updated to the latest inserted value
-    pub fn insert_connection(&self, connection_unique_id: U, connection_node: ConnectionNode<M>) -> Option<M> {
+    pub fn insert_connection(
+        &self,
+        connection_unique_id: U,
+        connection_node: ConnectionNode<M>,
+    ) -> Option<M> {
         // check for the drain status flag
         // if the drain is true, means the draining process is currently running
         if self.drain_status_flag.load(Relaxed) {

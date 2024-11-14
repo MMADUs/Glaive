@@ -1,5 +1,5 @@
-use std::time::{Duration, Instant};
 use std::task::Poll;
+use std::time::{Duration, Instant};
 use tokio::io;
 
 #[derive(Debug)]

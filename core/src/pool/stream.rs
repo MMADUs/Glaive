@@ -1,55 +1,12 @@
 use std::sync::Arc;
-use std::hash::{Hash, Hasher};
 use std::time::Duration;
-use crate::pool::pool::ConnectionPool;
-use crate::stream::{stream::Stream, types::StreamType};
-use tokio::sync::Mutex;
+
 use tokio::net::{TcpStream, UnixStream};
-use ahash::AHasher;
+use tokio::sync::Mutex;
 
-use super::pool::{ConnectionMetadata, ConnectionGroupID};
-
-enum PeerNetwork {
-    Tcp(String, usize),
-    Unix(String),
-}
-
-pub struct UpstreamPeer {
-    name: String,
-    service: String,
-    network: PeerNetwork,
-    connection_timeout: Option<usize>,
-}
-
-impl UpstreamPeer {
-    fn get_group_id(&self) -> ConnectionGroupID {
-        let mut hasher = AHasher::default();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-// hash implementation to generate connection peer id
-impl Hash for UpstreamPeer {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        self.name.hash(hasher);
-        self.service.hash(hasher);
-        // Hash the network enum variants and their contents
-        match &self.network {
-            PeerNetwork::Tcp(address, port) => {
-                // Hash a discriminant value for Tcp variant
-                hasher.write_u8(0);
-                address.hash(hasher);
-                port.hash(hasher);
-            }
-            PeerNetwork::Unix(path) => {
-                // Hash a discriminant value for Unix variant
-                hasher.write_u8(1);
-                path.hash(hasher);
-            }
-        }
-    }
-}
+use crate::pool::pool::{ConnectionMetadata, ConnectionPool};
+use crate::service::peer::{PeerNetwork, UpstreamPeer};
+use crate::stream::{stream::Stream, types::StreamType};
 
 // the stream manager is used as the bridge from request lifetime to connection pool
 // used to managing socket stream connection
@@ -62,16 +19,21 @@ const DEFAULT_POOL_SIZE: usize = 128;
 // PUBLIC METHODS
 // stream manager implementation
 impl StreamManager {
+    // new stream manager
     pub fn new(pool_size: Option<usize>) -> Self {
         StreamManager {
             connection_pool: Arc::new(ConnectionPool::new(pool_size.unwrap_or(DEFAULT_POOL_SIZE))),
         }
     }
 
+    // used to retrive connection from pool
+    // returns the stream and the bool value determine the newly created stream or reused
     pub async fn get_connection_from_pool(&self, peer: UpstreamPeer) -> Result<(Stream, bool), ()> {
         self.get_stream_connection(peer).await
     }
 
+    // used to return connection after use
+    // returns nothing
     async fn return_connection_to_pool(&self, connection: Stream, peer: UpstreamPeer) {
         self.return_stream_connection(connection, peer).await
     }
@@ -91,19 +53,17 @@ impl StreamManager {
                         let stream_type = StreamType::from(tcp_stream);
                         let dyn_stream_type: Stream = Box::new(stream_type);
                         dyn_stream_type
-                    },
+                    }
                     Err(_) => return Err(()),
                 }
-            },
-            PeerNetwork::Unix(socket_path) => {
-                match UnixStream::connect(socket_path).await {
-                    Ok(unix_stream) => {
-                        let stream_type = StreamType::from(unix_stream);
-                        let dyn_stream_type: Stream = Box::new(stream_type);
-                        dyn_stream_type
-                    },
-                    Err(_) => return Err(()),
+            }
+            PeerNetwork::Unix(socket_path) => match UnixStream::connect(socket_path).await {
+                Ok(unix_stream) => {
+                    let stream_type = StreamType::from(unix_stream);
+                    let dyn_stream_type: Stream = Box::new(stream_type);
+                    dyn_stream_type
                 }
+                Err(_) => return Err(()),
             },
         };
         Ok(stream)
@@ -127,10 +87,10 @@ impl StreamManager {
                         // unwrap the mutex
                         let connection_stream: Stream = stream.into_inner();
                         Some(connection_stream)
-                    },
+                    }
                     Err(_) => None,
                 }
-            },
+            }
             None => None,
         }
     }
@@ -143,17 +103,13 @@ impl StreamManager {
         // find connection from pool
         let reused_connection = self.find_connection_stream(&peer).await;
         match reused_connection {
-            Some(stream_connection) => {
-                return Ok((stream_connection, true))
-            },
+            Some(stream_connection) => return Ok((stream_connection, true)),
             None => {
                 // new socket connection
                 let new_stream_connection = self.new_stream_connection(&peer).await;
                 match new_stream_connection {
-                    Ok(stream_connection) => {
-                        return Ok((stream_connection, false))
-                    },
-                    Err(_) => return Err(())
+                    Ok(stream_connection) => return Ok((stream_connection, false)),
+                    Err(_) => return Err(()),
                 }
             }
         }
@@ -168,14 +124,22 @@ impl StreamManager {
         let metadata = ConnectionMetadata::new(group_id, unique_id);
         // wrapping connection and store it to pool
         let connection_stream = Arc::new(Mutex::new(connection));
-        let (closed_connection_notifier, connection_pickup_notification) = self.connection_pool.add_connection(&metadata, connection_stream);
+        let (closed_connection_notifier, connection_pickup_notification) = self
+            .connection_pool
+            .add_connection(&metadata, connection_stream);
         let pool = Arc::clone(&self.connection_pool);
         // if the peer provides an idle timeout
         // the returned idle connection will be removed when time exceeded
         if let Some(timeout) = peer.connection_timeout {
             let timeout_duration = Duration::from_secs(timeout as u64);
             tokio::spawn(async move {
-                pool.connection_idle_timeout(&metadata, timeout_duration, closed_connection_notifier, connection_pickup_notification).await;
+                pool.connection_idle_timeout(
+                    &metadata,
+                    timeout_duration,
+                    closed_connection_notifier,
+                    connection_pickup_notification,
+                )
+                .await;
             });
         }
     }

@@ -105,7 +105,7 @@ impl<T> ConnectionNode<T> {
         };
         // pop out the connection from the list
         if let Some(connection) = connection_list.remove(&connection_id) {
-            return Some((connection_id, connection))
+            return Some((connection_id, connection));
         } else {
             None
         }

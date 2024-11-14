@@ -7,7 +7,12 @@ use std::{
 };
 
 // a wrapper for setting socket options
-fn set_socket_option<T: Copy>(fd: RawFd, level: c_int, optname: c_int, value: &T) -> io::Result<()> {
+fn set_socket_option<T: Copy>(
+    fd: RawFd,
+    level: c_int,
+    optname: c_int,
+    value: &T,
+) -> io::Result<()> {
     let result = unsafe {
         libc::setsockopt(
             fd,

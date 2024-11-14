@@ -5,8 +5,9 @@ use tokio::io::{self, AsyncRead, AsyncWrite, BufStream, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::net::UnixStream;
 
-use crate::stream::{raw::RawStream, traits::UniqueID, duration::AccumulatedDuration};
+use crate::listener::sys::{set_tcp_keepalive, TcpKeepAliveConfig};
 use crate::pool::pool::ConnectionID;
+use crate::stream::{duration::AccumulatedDuration, raw::RawStream, traits::UniqueID};
 
 // Large read buffering helps reducing syscalls with little trade-off
 // Ssl layer always does "small" reads in 16k (TLS record size) so L4 read buffer helps a lot.
@@ -42,9 +43,13 @@ impl StreamType {
     }
 
     // only works if stream type is tcp, otherwise do nothing
-    pub fn set_keepalive(&mut self) {
-        if let RawStream::Tcp(_stream) = &self.stream.get_mut() {
-            // TODO: set keep alive from low lvl syscall here
+    pub fn set_keepalive(&mut self, config: TcpKeepAliveConfig) {
+        if let RawStream::Tcp(stream) = &self.stream.get_mut() {
+            let fd = stream.as_raw_fd();
+            // calling from sys utils: providing low level socket optimization
+            if let Err(e) = set_tcp_keepalive(fd, config) {
+                panic!("{}", e);
+            }
         }
     }
 
