@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 
 // upstream peer network type
 pub enum PeerNetwork {
-    Tcp(String, usize),
+    Tcp(String),
     Unix(String),
 }
 
@@ -49,11 +49,10 @@ impl Hash for UpstreamPeer {
         self.service.hash(hasher);
         // Hash the network enum variants and their contents
         match &self.network {
-            PeerNetwork::Tcp(address, port) => {
+            PeerNetwork::Tcp(address) => {
                 // Hash a discriminant value for Tcp variant
                 hasher.write_u8(0);
                 address.hash(hasher);
-                port.hash(hasher);
             }
             PeerNetwork::Unix(path) => {
                 // Hash a discriminant value for Unix variant

@@ -28,13 +28,13 @@ impl StreamManager {
 
     // used to retrive connection from pool
     // returns the stream and the bool value determine the newly created stream or reused
-    pub async fn get_connection_from_pool(&self, peer: UpstreamPeer) -> Result<(Stream, bool), ()> {
+    pub async fn get_connection_from_pool(&self, peer: &UpstreamPeer) -> Result<(Stream, bool), ()> {
         self.get_stream_connection(peer).await
     }
 
     // used to return connection after use
     // returns nothing
-    async fn return_connection_to_pool(&self, connection: Stream, peer: UpstreamPeer) {
+    pub async fn return_connection_to_pool(&self, connection: Stream, peer: &UpstreamPeer) {
         self.return_stream_connection(connection, peer).await
     }
 }
@@ -46,9 +46,8 @@ impl StreamManager {
     // returns the connection stream
     async fn new_stream_connection(&self, peer: &UpstreamPeer) -> Result<Stream, ()> {
         let stream = match &peer.network {
-            PeerNetwork::Tcp(address, port) => {
-                let tcp_address = format!("{}:{}", address, port);
-                match TcpStream::connect(tcp_address).await {
+            PeerNetwork::Tcp(address) => {
+                match TcpStream::connect(address).await {
                     Ok(tcp_stream) => {
                         let stream_type = StreamType::from(tcp_stream);
                         let dyn_stream_type: Stream = Box::new(stream_type);
@@ -99,7 +98,7 @@ impl StreamManager {
     // this is the function that is going to be called during request
     // find a connection in pool, if does not exist, create a new socket connection
     // returns the stream and the bool to determine if the connection is new or reused.
-    async fn get_stream_connection(&self, peer: UpstreamPeer) -> Result<(Stream, bool), ()> {
+    async fn get_stream_connection(&self, peer: &UpstreamPeer) -> Result<(Stream, bool), ()> {
         // find connection from pool
         let reused_connection = self.find_connection_stream(&peer).await;
         match reused_connection {
@@ -117,7 +116,7 @@ impl StreamManager {
 
     // used to return used connection after request finished
     // returns nothing
-    async fn return_stream_connection(&self, connection: Stream, peer: UpstreamPeer) {
+    async fn return_stream_connection(&self, connection: Stream, peer: &UpstreamPeer) {
         // generate new metadata
         let group_id = peer.get_group_id();
         let unique_id = connection.get_unique_id();

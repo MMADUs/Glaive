@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tokio::runtime::{Builder, Handle};
 use tokio::signal::unix;
 
@@ -81,9 +82,10 @@ impl<A: ServiceType + Send + Sync + 'static> Server<A> {
         // run each listener service on top of the runtime
         let runtime = Runtime::new("runtime", alloc_threads);
         let address_stack = service.get_address_stack();
+        let service = Arc::new(service);
         runtime.handle_work().spawn(async move {
             // run the async service here
-            Service::start_service(address_stack, service).await;
+            service.start_service(address_stack).await;
         });
         runtime
     }
