@@ -108,7 +108,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
             "node 1",
             &self.name,
             PeerNetwork::Tcp("127.0.0.1:8000".to_string()),
-            None,
+            Some(10),
         );
 
         // get upstream connection
