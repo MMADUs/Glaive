@@ -3,6 +3,7 @@ pub mod server;
 pub mod service;
 pub mod pool;
 pub mod stream;
+pub mod prelude;
 
 use std::sync::Arc;
 

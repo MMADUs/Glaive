@@ -1,16 +1,17 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+// use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
+use crate::service::buffer::SessionBuffer;
 use crate::service::service::{Service, ServiceType};
 use crate::stream::stream::Stream;
 
 #[derive(Debug)]
 enum ProxyTask {
     Body(Option<Arc<Bytes>>, bool),
-    Failed(Box<dyn Error>),
+    Failed(Box<dyn Error + Send + Sync>),
 }
 
 impl ProxyTask {
@@ -22,64 +23,80 @@ impl ProxyTask {
     }
 }
 
-struct Connection {
-    stream: Stream,
-    read_buf: BytesMut,
-    write_buf: BytesMut,
-}
+// struct Connection {
+//     stream: Stream,
+//     read_buf: BytesMut,
+//     write_buf: BytesMut,
+// }
+//
+// impl Connection {
+//     fn new(stream: Stream) -> Self {
+//         Self {
+//             stream,
+//             read_buf: BytesMut::with_capacity(1024 * 64),
+//             write_buf: BytesMut::with_capacity(1024 * 64),
+//         }
+//     }
+//
+//     async fn read_data(&mut self) -> Result<Option<Arc<Bytes>>, Box<dyn Error>> {
+//         // Read from TCP stream into the buffer
+//         let bytes_read = self.stream.read_buf(&mut self.read_buf).await?;
+//         if bytes_read == 0 {
+//             return Ok(None); // EOF reached
+//         }
+//
+//         // Split off the filled portion into a Bytes
+//         let data = self.read_buf.split().freeze();
+//         Ok(Some(Arc::new(data)))
+//     }
+//
+//     async fn write_data(&mut self, data: Arc<Bytes>) -> Result<(), Box<dyn Error>> {
+//         self.write_buf.put_slice(&data);
+//         // Write the buffered data to the TCP stream
+//         self.stream.write_all(&self.write_buf).await?;
+//         self.write_buf.clear();
+//         Ok(())
+//     }
+//
+//     async fn flush(&mut self) -> Result<(), Box<dyn Error>> {
+//         if !self.write_buf.is_empty() {
+//             self.stream.write_all(&self.write_buf).await?;
+//             self.write_buf.clear();
+//         }
+//         self.stream.flush().await?;
+//         Ok(())
+//     }
+// }
 
-impl Connection {
-    fn new(stream: Stream) -> Self {
-        Self {
-            stream,
-            read_buf: BytesMut::with_capacity(8 * 1024),
-            write_buf: BytesMut::with_capacity(8 * 1024),
-        }
-    }
-
-    async fn read_data(&mut self) -> Result<Option<Arc<Bytes>>, Box<dyn Error>> {
-        // Read from TCP stream into the buffer
-        let bytes_read = self.stream.read_buf(&mut self.read_buf).await?;
-        if bytes_read == 0 {
-            return Ok(None); // EOF reached
-        }
-
-        // Split off the filled portion into a Bytes
-        let data = self.read_buf.split().freeze();
-        Ok(Some(Arc::new(data)))
-    }
-
-    async fn write_data(&mut self, data: Arc<Bytes>) -> Result<(), Box<dyn Error>> {
-        self.write_buf.put_slice(&data);
-        // Write the buffered data to the TCP stream
-        self.stream.write_all(&self.write_buf).await?;
-        self.write_buf.clear();
-        Ok(())
-    }
-
-    async fn flush(&mut self) -> Result<(), Box<dyn Error>> {
-        if !self.write_buf.is_empty() {
-            self.stream.write_all(&self.write_buf).await?;
-            self.write_buf.clear();
-        }
-        self.stream.flush().await?;
-        Ok(())
-    }
-}
+const BUFFER_SIZE: usize = 32;
 
 // handle request and io zero-copy bidirectionally
 // with full duplex mechanism
-impl<A: ServiceType + Send + Sync + 'static> Service<A> {
+impl<A: ServiceType> Service<A> {
+    // handle request function
+    // insert the stream to session buffer for buffer management
+    pub async fn handle_request(&self, downstream: &mut SessionBuffer, upstream: &mut SessionBuffer) {
+        match self
+            .copy_bidirectional(downstream, upstream)
+            .await
+        {
+            Ok(_) => println!("copy successful"),
+            Err(_) => println!("error duing copy"),
+        }
+    }
+
+    // the main operation that does io copy bidirectionally
+    // split the session buffer into 2 diffrent concurrent task
     async fn copy_bidirectional(
         &self,
-        client_session: &mut Connection,
-        server_session: &mut Connection,
-    ) -> Result<(), Box<dyn Error>> {
-        const BUFFER_SIZE: usize = 32;
-
+        client_session: &mut SessionBuffer,
+        server_session: &mut SessionBuffer,
+    ) -> Result<(), Option<Box<dyn Error>>> {
+        // split stream buffer into 2 task
         let (tx_to_server, rx_to_server) = mpsc::channel(BUFFER_SIZE);
         let (tx_to_client, rx_to_client) = mpsc::channel(BUFFER_SIZE);
 
+        // handle both concurrently
         let result = tokio::try_join!(
             Self::copy_client_to_server(client_session, tx_to_server, rx_to_client),
             Self::copy_server_to_client(server_session, tx_to_client, rx_to_server)
@@ -87,12 +104,14 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
 
         match result {
             Ok(_) => Ok(()),
-            Err(e) => Err(e),
+            Err(e) => Err(Some(e)),
         }
     }
 
+    // function runs concurrently
+    // the operation for copying buffer from client to server
     async fn copy_client_to_server(
-        client: &mut Connection,
+        client: &mut SessionBuffer,
         tx: mpsc::Sender<ProxyTask>,
         mut rx: mpsc::Receiver<ProxyTask>,
     ) -> Result<(), Box<dyn Error>> {
@@ -109,7 +128,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 // the first process that execute concurrently
                 // read the buffer from client
                 // process will keep running until request flag is done/finished
-                result = client.read_data(), if !request_done => {
+                result = client.read_body(), if !request_done => {
                     match result {
                         // processed to read the data from client
                         Ok(maybe_data) => {
@@ -117,11 +136,12 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                             // the task contains the buffer from client
                             // task will be consumed by another thread concurrently for writing to upstream
                             let is_end = maybe_data.is_none();
-                            let _ = tx.send(ProxyTask::Body(maybe_data, is_end)).await;
+                            tx.send(ProxyTask::Body(maybe_data, is_end)).await?;
                             request_done = is_end;
                         }
                         Err(e) => {
-                            let _ = tx.send(ProxyTask::Failed(e)).await;
+                            let error: Box<dyn Error + Send + Sync> = Box::new(std::io::Error::new(std::io::ErrorKind::Other, e));
+                            tx.send(ProxyTask::Failed(error)).await?;
                             return Ok(());
                         }
                     }
@@ -138,7 +158,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                         // when writing finished, response is sent to client instantly.
                         Some(ProxyTask::Body(maybe_data, is_end)) => {
                             if let Some(data) = maybe_data {
-                                client.write_data(data).await?;
+                                client.write_body(data).await?;
                             }
                             if is_end {
                                 client.flush().await?;
@@ -152,6 +172,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                     }
                 }
 
+                // this should not be reach at any point
                 else => break,
             }
         }
@@ -159,8 +180,10 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
         Ok(())
     }
 
+    // function runs concurrently
+    // the operation for copying buffer from server to client
     async fn copy_server_to_client(
-        server: &mut Connection,
+        server: &mut SessionBuffer,
         tx: mpsc::Sender<ProxyTask>,
         mut rx: mpsc::Receiver<ProxyTask>,
     ) -> Result<(), Box<dyn Error>> {
@@ -173,7 +196,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 // it is listening for response from upstream server
                 // tries to read buffer from upstream server
                 // process will keep runnign until response flag is done/finished
-                result = server.read_data(), if !response_done => {
+                result = server.read_body(), if !response_done => {
                     match result {
                         // processed to read data from upstream server
                         Ok(maybe_data) => {
@@ -181,11 +204,11 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                             // the task contains the buffer from upstream server
                             // task will be consumed by another thread concurrently for writing to downstream client
                             let is_end = maybe_data.is_none();
-                            let _ = tx.send(ProxyTask::Body(maybe_data, is_end)).await;
+                            tx.send(ProxyTask::Body(maybe_data, is_end)).await?;
                             response_done = is_end;
                         }
                         Err(e) => {
-                            let _ = tx.send(ProxyTask::Failed(e)).await;
+                            tx.send(ProxyTask::Failed(e)).await?;
                             return Ok(());
                         }
                     }
@@ -201,7 +224,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                         Some(ProxyTask::Body(maybe_data, is_end)) => {
                             // perform a write operation to upstream server
                             if let Some(data) = maybe_data {
-                                server.write_data(data).await?;
+                                server.write_body(data).await?;
                             }
                             if is_end {
                                 server.flush().await?;
@@ -215,6 +238,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                     }
                 }
 
+                // this should not be reach at any point
                 else => break,
             }
         }

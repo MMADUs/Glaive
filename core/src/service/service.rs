@@ -1,10 +1,11 @@
-use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
-use crate::pool::stream::StreamManager;
-use crate::service::peer::{PeerNetwork, UpstreamPeer};
-use crate::stream::stream::Stream;
 use futures::future;
 use std::sync::Arc;
-use tokio::io::{self};
+
+use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
+use crate::pool::stream::StreamManager;
+use crate::service::buffer::SessionBuffer;
+use crate::service::peer::{PeerNetwork, UpstreamPeer};
+use crate::stream::stream::Stream;
 
 // TESTING traits for customization soon
 pub trait ServiceType: Send + Sync + 'static {
@@ -59,14 +60,14 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
             // same as any method that calls self
             let service = Arc::clone(self);
             tokio::spawn(async move {
-                let _ = service.run_service(network).await;
+                service.run_service(network).await;
             })
         });
         future::join_all(handlers).await;
     }
 
     // run service is the main service runtime itself
-    async fn run_service(self: &Arc<Self>, service_address: ListenerAddress) -> io::Result<()> {
+    async fn run_service(self: &Arc<Self>, service_address: ListenerAddress) {
         let listener = service_address.bind_to_listener().await;
         println!("service is running");
         // began infinite loop
@@ -82,10 +83,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                     let service = Arc::clone(self);
                     tokio::spawn(async move {
                         // handle here
-                        if let Err(e) = service.handle_connection(downstream, socket_address).await
-                        {
-                            println!("uds handle error: {}", e);
-                        }
+                        service.handle_connection(downstream, socket_address).await
                     });
                 }
                 Err(e) => {
@@ -96,11 +94,7 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
     }
 
     // handling incoming request to here
-    async fn handle_connection(
-        self: &Arc<Self>,
-        _downstream: Stream,
-        _socket_address: Socket,
-    ) -> io::Result<()> {
+    async fn handle_connection(self: &Arc<Self>, downstream: Stream, _socket_address: Socket) {
         println!("some message!: {}", self.service.say_hi());
 
         // simulate a given backend peer
@@ -112,51 +106,44 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
         );
 
         // get upstream connection
-        let upstream = self.stream_session.get_connection_from_pool(&peer).await;
-
-        // stream validation
-        let stream = match upstream {
-            Ok((stream, is_reused)) => {
+        match self.stream_session.get_connection_from_pool(&peer).await {
+            Ok((upstream, is_reused)) => {
                 if is_reused {
                     println!("reusing stream from pool");
                 } else {
                     println!("connection does not exist in pool, new stream created");
                 }
-                Some(stream)
+
+                let mut client_session = SessionBuffer::new(downstream);
+                let mut server_session = SessionBuffer::new(upstream);
+                
+                self.handle_request(&mut client_session, &mut server_session).await;
             }
-            Err(_) => {
-                println!("error getting stream from pool");
-                None
-            }
-        };
+            Err(_) => println!("error getting stream from pool"),
+        }
 
-        // copy both direction and return the stream to pool
-        if let Some(upstream) = stream {
-            // do proxy process here
-
-            self.stream_session
-                .return_connection_to_pool(upstream, &peer)
-                .await;
-        };
-
-        // get stream session for request
-
-        // let upstream = TcpStream::connect(&upstream_addr).await?;
-        //
-        // let (mut downstream_read, mut downstream_write) = downstream.split();
-        // let (mut upstream_read, mut upstream_write) = upstream.split();
-        //
-        // let client_to_upstream = async {
-        //     io::copy(&mut downstream_read, &mut upstream_write).await?;
-        //     upstream_write.shutdown().await
+        // // stream validation
+        // let stream = match upstream {
+        //     Ok((stream, is_reused)) => {
+        //         if is_reused {
+        //             println!("reusing stream from pool");
+        //         } else {
+        //             println!("connection does not exist in pool, new stream created");
+        //         }
+        //         Some(stream)
+        //     }
+        //     Err(_) => {
+        //         println!("error getting stream from pool");
+        //         None
+        //     }
         // };
         //
-        // let upstream_to_client = async {
-        //     io::copy(&mut upstream_read, &mut downstream_write).await?;
-        //     downstream_write.shutdown().await
-        // };
+        // if let Some(upstream) = stream {
+        //     self.handle_request(downstream, upstream).await;
         //
-        // tokio::try_join!(client_to_upstream, upstream_to_client)?;
-        Ok(())
+        //     // self.stream_session
+        //     //     .return_connection_to_pool(upstream, &peer)
+        //     //     .await;
+        // };
     }
 }
