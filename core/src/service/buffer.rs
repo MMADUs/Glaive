@@ -104,7 +104,7 @@ impl SessionBuffer {
     }
 
     // Optimized header writing
-    pub async fn write_headers(&mut self, headers: &Headers) -> Result<(), Box<dyn Error>> {
+    pub async fn write_headers(&mut self, headers: &Headers) -> tokio::io::Result<()> {
         // Pre-calculate capacity to avoid reallocations
         let mut estimated_size = 0;
         for (name, value) in &headers.headers {
@@ -133,7 +133,7 @@ impl SessionBuffer {
     }
 
     // Optimized body reading with zero-copy
-    pub async fn read_body(&mut self) -> Result<Option<Arc<Bytes>>, String> {
+    pub async fn read_body(&mut self) -> tokio::io::Result<Option<Arc<Bytes>>> {
         // First use any data remaining in buffer from header reading
         if !self.buffer.is_empty() {
             let data = self.buffer.split().freeze();
@@ -141,10 +141,7 @@ impl SessionBuffer {
         }
 
         // Read new data if buffer is empty
-        let bytes_read = match self.stream.read_buf(&mut self.buffer).await {
-            Ok(bytes) => bytes,
-            Err(e) => return Err(e.to_string()),
-        };
+        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
         if bytes_read == 0 {
             return Ok(None); // EOF
         }
@@ -154,24 +151,19 @@ impl SessionBuffer {
     }
 
     // Optimized body writing with zero-copy
-    pub async fn write_body(&mut self, data: Arc<Bytes>) -> Result<(), String> {
-        if let Err(e) = self.stream.write_all(&data).await {
-            return Err(e.to_string())
-        }
+    pub async fn write_body(&mut self, data: Arc<Bytes>) -> tokio::io::Result<()> {
+        self.stream.write_all(&data).await?;
+        self.flush().await?;
         Ok(())
     }
 
     // Flush any remaining data
-    pub async fn flush(&mut self) -> Result<(), String> {
+    pub async fn flush(&mut self) -> tokio::io::Result<()> {
         if !self.buffer.is_empty() {
-            if let Err(e) = self.stream.write_all(&self.buffer).await {
-                return Err(e.to_string())
-            }
+            self.stream.write_all(&self.buffer).await?;
             self.buffer.clear();
         }
-        if let Err(e) = self.stream.flush().await {
-            return Err(e.to_string())
-        }
+        self.stream.flush().await?;
         Ok(())
     }
 

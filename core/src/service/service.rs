@@ -117,7 +117,10 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 let mut client_session = SessionBuffer::new(downstream);
                 let mut server_session = SessionBuffer::new(upstream);
                 
-                self.handle_request(&mut client_session, &mut server_session).await;
+                match self.copy_bidirectional(&mut client_session, &mut server_session).await {
+                    Ok(_) => println!("copy bidirectional succeed"),
+                    Err(_) => println!("copy bidirectional failed"),
+                }
             }
             Err(_) => println!("error getting stream from pool"),
         }

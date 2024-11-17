@@ -73,33 +73,22 @@ const BUFFER_SIZE: usize = 32;
 // handle request and io zero-copy bidirectionally
 // with full duplex mechanism
 impl<A: ServiceType> Service<A> {
-    // handle request function
-    // insert the stream to session buffer for buffer management
-    pub async fn handle_request(&self, downstream: &mut SessionBuffer, upstream: &mut SessionBuffer) {
-        match self
-            .copy_bidirectional(downstream, upstream)
-            .await
-        {
-            Ok(_) => println!("copy successful"),
-            Err(_) => println!("error duing copy"),
-        }
-    }
-
     // the main operation that does io copy bidirectionally
     // split the session buffer into 2 diffrent concurrent task
-    async fn copy_bidirectional(
+    pub async fn copy_bidirectional(
         &self,
         client_session: &mut SessionBuffer,
         server_session: &mut SessionBuffer,
-    ) -> Result<(), Option<Box<dyn Error>>> {
+    ) -> Result<(), Option<Box<dyn Error + Send + Sync>>> {
         // split stream buffer into 2 task
         let (tx_to_server, rx_to_server) = mpsc::channel(BUFFER_SIZE);
         let (tx_to_client, rx_to_client) = mpsc::channel(BUFFER_SIZE);
 
+        println!("copying stream...");
         // handle both concurrently
         let result = tokio::try_join!(
-            Self::copy_client_to_server(client_session, tx_to_server, rx_to_client),
-            Self::copy_server_to_client(server_session, tx_to_client, rx_to_server)
+            Self::handle_downstream(client_session, tx_to_server, rx_to_client),
+            Self::handle_upstream(server_session, tx_to_client, rx_to_server)
         );
 
         match result {
@@ -110,11 +99,11 @@ impl<A: ServiceType> Service<A> {
 
     // function runs concurrently
     // the operation for copying buffer from client to server
-    async fn copy_client_to_server(
+    async fn handle_downstream(
         client: &mut SessionBuffer,
         tx: mpsc::Sender<ProxyTask>,
         mut rx: mpsc::Receiver<ProxyTask>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // process flag
         // to determine wether which process is completed
         let mut request_done = false;
@@ -132,6 +121,7 @@ impl<A: ServiceType> Service<A> {
                     match result {
                         // processed to read the data from client
                         Ok(maybe_data) => {
+                            println!("read from client");
                             // send the proxy task to the channel
                             // the task contains the buffer from client
                             // task will be consumed by another thread concurrently for writing to upstream
@@ -140,7 +130,7 @@ impl<A: ServiceType> Service<A> {
                             request_done = is_end;
                         }
                         Err(e) => {
-                            let error: Box<dyn Error + Send + Sync> = Box::new(std::io::Error::new(std::io::ErrorKind::Other, e));
+                            let error: Box<dyn Error + Send + Sync> = Box::new(e);
                             tx.send(ProxyTask::Failed(error)).await?;
                             return Ok(());
                         }
@@ -157,6 +147,7 @@ impl<A: ServiceType> Service<A> {
                         // write data to client
                         // when writing finished, response is sent to client instantly.
                         Some(ProxyTask::Body(maybe_data, is_end)) => {
+                            println!("send to client");
                             if let Some(data) = maybe_data {
                                 client.write_body(data).await?;
                             }
@@ -182,11 +173,11 @@ impl<A: ServiceType> Service<A> {
 
     // function runs concurrently
     // the operation for copying buffer from server to client
-    async fn copy_server_to_client(
+    async fn handle_upstream(
         server: &mut SessionBuffer,
         tx: mpsc::Sender<ProxyTask>,
         mut rx: mpsc::Receiver<ProxyTask>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut request_done = false;
         let mut response_done = false;
 
@@ -200,6 +191,7 @@ impl<A: ServiceType> Service<A> {
                     match result {
                         // processed to read data from upstream server
                         Ok(maybe_data) => {
+                            println!("read response");
                             // send the proxy task to the channel
                             // the task contains the buffer from upstream server
                             // task will be consumed by another thread concurrently for writing to downstream client
@@ -208,7 +200,8 @@ impl<A: ServiceType> Service<A> {
                             response_done = is_end;
                         }
                         Err(e) => {
-                            tx.send(ProxyTask::Failed(e)).await?;
+                            let error: Box<dyn Error + Send + Sync> = Box::new(e);
+                            tx.send(ProxyTask::Failed(error)).await?;
                             return Ok(());
                         }
                     }
@@ -222,6 +215,7 @@ impl<A: ServiceType> Service<A> {
                     match maybe_task {
                         // receive the task with buffer
                         Some(ProxyTask::Body(maybe_data, is_end)) => {
+                            println!("send to backend");
                             // perform a write operation to upstream server
                             if let Some(data) = maybe_data {
                                 server.write_body(data).await?;
