@@ -1,5 +1,6 @@
 use futures::future;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
 use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
 use crate::pool::stream::StreamManager;
@@ -78,12 +79,13 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 // shutdown signal here to break loop
             };
             match new_io {
-                Ok((downstream, socket_address)) => {
+                Ok((mut downstream, socket_address)) => {
                     // get self reference
                     let service = Arc::clone(self);
                     tokio::spawn(async move {
                         // handle here
-                        service.handle_connection(downstream, socket_address).await
+                        // service.handle_connection(downstream, socket_address).await
+                        service.test_handle(downstream).await
                     });
                 }
                 Err(e) => {
@@ -91,6 +93,44 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 }
             };
         }
+    }
+
+    async fn test_handle(&self, mut socket: Stream) -> tokio::io::Result<()> {
+        let mut buffer = vec![0; 1024];
+
+        // Read the request
+        let n = socket.read(&mut buffer).await?;
+        println!("Received {} bytes", n);
+
+        // Print raw request for debugging
+        println!("Raw request:\n{}", String::from_utf8_lossy(&buffer[..n]));
+
+        // Create JSON response
+        let json_response = r#"{
+        "message": "Hello from Rust Tokio server!",
+        "status": "success"
+        }"#;
+
+        // Create HTTP response
+        let response = format!(
+            "HTTP/1.1 200 OK\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+            json_response.len(),
+            json_response
+        );
+
+        // Write response back to socket
+        socket.write_all(response.as_bytes()).await?;
+        socket.flush().await?;
+
+        println!("Sent response successfully\n");
+
+        Ok(())
     }
 
     // handling incoming request to here
@@ -116,8 +156,11 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
 
                 let mut client_session = SessionBuffer::new(downstream);
                 let mut server_session = SessionBuffer::new(upstream);
-                
-                match self.copy_bidirectional(&mut client_session, &mut server_session).await {
+
+                match self
+                    .copy_bidirectional(&mut client_session, &mut server_session)
+                    .await
+                {
                     Ok(_) => println!("copy bidirectional succeed"),
                     Err(_) => println!("copy bidirectional failed"),
                 }

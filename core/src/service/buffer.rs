@@ -1,174 +1,197 @@
+use bytes::{BufMut, Bytes, BytesMut};
+use http::header;
+use httparse::{Request, Status};
 use std::collections::HashMap;
-use std::error::Error;
-use std::sync::Arc;
-use bytes::{BufMut, BytesMut, Bytes};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
+use url::form_urlencoded;
 
+use crate::service::offset::KVRef;
 use crate::stream::stream::Stream;
 
-#[derive(Debug)]
-pub struct Headers {
-    headers: HashMap<String, String>,
+pub struct BufferSession {
+    pub stream: Stream,
+    pub buffer: Bytes,
+    pub method: Option<String>,
+    pub path: Option<Bytes>,  // Now using Bytes instead of String
+    pub version: Option<String>,
+    pub query_params: Vec<(Bytes, Bytes)>,  // Zero-copy query params as Bytes pairs
+    pub headers: HashMap<Bytes, Bytes>,
 }
 
-impl Headers {
-    pub fn new() -> Self {
-        Headers {
-            headers: HashMap::new()
-        }
-    }
+impl BufferSession {
+    const INIT_BUFFER_SIZE: usize = 1024;
+    const MAX_HEADER_SIZE: usize = 8192;
+    const MAX_HEADERS_COUNT: usize = 256;
 
-    #[inline]
-    pub fn get(&self, name: &str) -> Option<&String> {
-        self.headers.get(&name.to_lowercase())
-    }
-    
-    #[inline]
-    pub fn set(&mut self, name: String, value: String) {
-        self.headers.insert(name.to_lowercase(), value);
-    }
-    
-    #[inline]
-    pub fn remove(&mut self, name: &str) -> Option<String> {
-        self.headers.remove(&name.to_lowercase())
-    }
-}
-
-pub struct SessionBuffer {
-    stream: Stream,
-    // Single buffer for both reading and writing
-    buffer: BytesMut,
-}
-
-impl SessionBuffer {
     pub fn new(stream: Stream) -> Self {
-        Self {
+        BufferSession {
             stream,
-            // Larger initial capacity for efficient header and body handling
-            buffer: BytesMut::with_capacity(64 * 1024), // 64KB
+            buffer: Bytes::new(),
+            method: None,
+            path: None,
+            version: None,
+            query_params: Vec::new(),
+            headers: HashMap::new(),
         }
     }
 
-    // Optimized header reading
-    pub async fn read_headers(&mut self) -> Result<Headers, Box<dyn Error>> {
-        let mut headers = Headers::new();
-        let mut header_end_pos = None;
-        
+    // Parse the HTTP request from the stream buffer
+    pub async fn read_stream(&mut self) -> tokio::io::Result<Option<usize>> {
+        let mut init_buffer = BytesMut::with_capacity(Self::INIT_BUFFER_SIZE);
+        let mut already_read: usize = 0;
+
         loop {
-            // Check if we already have the complete headers in buffer
-            if let Some(pos) = self.find_headers_end() {
-                header_end_pos = Some(pos);
-                break;
+            if already_read > Self::MAX_HEADER_SIZE {
+                return Err(tokio::io::Error::new(
+                    tokio::io::ErrorKind::Other,
+                    "request larger than {Self::MAX_HEADER_SIZE}",
+                ));
             }
 
-            // Read more data if needed
-            let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
-            if bytes_read == 0 {
-                return Err("Unexpected EOF while reading headers".into());
+            let len = match self.stream.read_buf(&mut init_buffer).await {
+                Ok(0) if already_read > 0 => {
+                    return Err(tokio::io::Error::new(
+                        tokio::io::ErrorKind::Other,
+                        "connection closed",
+                    ));
+                }
+                Ok(0) => return Ok(None),
+                Ok(n) => n,
+                Err(e) => return Err(e),
+            };
+
+            already_read += len;
+
+            let mut headers = [httparse::EMPTY_HEADER; Self::MAX_HEADERS_COUNT];
+            let mut req = Request::new(&mut headers);
+
+            match req.parse(&init_buffer) {
+                Ok(Status::Complete(s)) => {
+                    // Zero-copy parsing
+                    let base = init_buffer.as_ptr() as usize;
+                    let mut header_refs = Vec::<KVRef>::with_capacity(req.headers.len());
+
+                    for header in req.headers.iter() {
+                        if !header.name.is_empty() {
+                            header_refs.push(KVRef::new(
+                                header.name.as_ptr() as usize - base,
+                                header.name.as_bytes().len(),
+                                header.value.as_ptr() as usize - base,
+                                header.value.len(),
+                            ));
+                        }
+                    }
+
+                    // Version parsing with explicit HTTP version support
+                    self.version = match req.version {
+                        Some(0) => Some("HTTP/1.0".to_string()),
+                        Some(1) => Some("HTTP/1.1".to_string()),
+                        Some(2) => Some("HTTP/2.0".to_string()),
+                        _ => Some("HTTP/0.9".to_string()),
+                    };
+
+                    // Method parsing
+                    self.method = req.method.map(|m| m.to_uppercase());
+
+                    // Path parsing with query parameter extraction
+                    if let Some(p) = req.path {
+                        let path_start = p.as_ptr() as usize - base;
+                        let path_len = p.len();
+                        self.path = Some(init_buffer.slice(path_start..(path_start + path_len)));
+
+                        // Query parameter parsing as zero-copy pairs
+                        if let Some(query_str) = p.split('?').nth(1) {
+                            for (key, value) in form_urlencoded::parse(query_str.as_bytes()) {
+                                self.query_params.push((
+                                    Bytes::copy_from_slice(key.as_bytes()),
+                                    Bytes::copy_from_slice(value.as_bytes()),
+                                ));
+                            }
+                        }
+                    }
+
+                    let freezed_buf = init_buffer.freeze();
+
+                    for header in header_refs {
+                        let header_name = header.get_name_bytes(&freezed_buf);
+                        let header_value = header.get_value_bytes(&freezed_buf);
+                        self.headers.insert(header_name, header_value);
+                    }
+
+                    // Freeze buffer to prevent modifications
+                    self.buffer = freezed_buf;
+                    return Ok(Some(s));
+                }
+                Ok(Status::Partial) => continue,
+                Err(e) => {
+                    return Err(tokio::io::Error::new(
+                        tokio::io::ErrorKind::Other,
+                        e.to_string(),
+                    ))
+                }
             }
         }
-
-        // Process headers
-        let header_end = header_end_pos.unwrap();
-        let header_data = self.buffer.split_to(header_end + 4); // +4 for \r\n\r\n
-        let header_str = String::from_utf8_lossy(&header_data);
-
-        // Parse headers efficiently
-        for line in header_str.lines() {
-            if line.is_empty() || line == "\r" {
-                continue;
-            }
-
-            if let Some((name, value)) = line.split_once(':') {
-                headers.set(
-                    name.trim().to_owned(),
-                    value.trim().to_owned()
-                );
-            }
-        }
-
-        Ok(headers)
     }
 
-    // Helper method to find the end of headers
-    #[inline]
-    fn find_headers_end(&self) -> Option<usize> {
-        let mut pos = 0;
-        while pos + 4 <= self.buffer.len() {
-            if &self.buffer[pos..pos + 4] == b"\r\n\r\n" {
-                return Some(pos);
-            }
-            pos += 1;
-        }
-        None
-    }
-
-    // Optimized header writing
-    pub async fn write_headers(&mut self, headers: &Headers) -> tokio::io::Result<()> {
-        // Pre-calculate capacity to avoid reallocations
-        let mut estimated_size = 0;
-        for (name, value) in &headers.headers {
-            estimated_size += name.len() + value.len() + 4; // 4 for ": " and "\r\n"
-        }
-        estimated_size += 2; // Final "\r\n"
-
-        // Ensure we have enough capacity
-        if self.buffer.capacity() - self.buffer.len() < estimated_size {
-            self.buffer.reserve(estimated_size);
-        }
-
-        // Write headers efficiently
-        for (name, value) in &headers.headers {
-            self.buffer.put_slice(name.as_bytes());
-            self.buffer.put_slice(b": ");
-            self.buffer.put_slice(value.as_bytes());
-            self.buffer.put_slice(b"\r\n");
-        }
-        self.buffer.put_slice(b"\r\n");
-
-        // Write to stream
-        self.stream.write_all(&self.buffer).await?;
-        self.buffer.clear();
-        Ok(())
-    }
-
-    // Optimized body reading with zero-copy
-    pub async fn read_body(&mut self) -> tokio::io::Result<Option<Arc<Bytes>>> {
-        // First use any data remaining in buffer from header reading
-        if !self.buffer.is_empty() {
-            let data = self.buffer.split().freeze();
-            return Ok(Some(Arc::new(data)));
-        }
-
-        // Read new data if buffer is empty
-        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
-        if bytes_read == 0 {
-            return Ok(None); // EOF
-        }
-
-        let data = self.buffer.split().freeze();
-        Ok(Some(Arc::new(data)))
-    }
-
-    // Optimized body writing with zero-copy
-    pub async fn write_body(&mut self, data: Arc<Bytes>) -> tokio::io::Result<()> {
-        self.stream.write_all(&data).await?;
-        self.flush().await?;
-        Ok(())
-    }
-
-    // Flush any remaining data
-    pub async fn flush(&mut self) -> tokio::io::Result<()> {
-        if !self.buffer.is_empty() {
-            self.stream.write_all(&self.buffer).await?;
-            self.buffer.clear();
-        }
-        self.stream.flush().await?;
-        Ok(())
-    }
-
-    // pop out stream from session buffer
-    pub async fn extract_stream(self) -> Stream {
-        self.stream
-    }
+    // // Insert or update a header by key
+    // pub fn insert_header(&mut self, key: &str, value: &str) {
+    //     self.headers.insert(key.to_string(), value.to_string());
+    // }
+    //
+    // // Remove a header by key
+    // pub fn remove_header(&mut self, key: &str) {
+    //     self.headers.remove(key);
+    // }
+    //
+    // // Parse form parameters (application/x-www-form-urlencoded)
+    // pub fn parse_request_params(&mut self, body: &[u8]) {
+    //     let form_params = form_urlencoded::parse(body)
+    //         .into_owned()
+    //         .collect::<HashMap<String, String>>();
+    //
+    //     self.request_params = form_params;
+    // }
+    //
+    // // Serialize the request back into a buffer
+    // pub fn to_buffer(&self) -> BytesMut {
+    //     let mut buffer = BytesMut::with_capacity(self.buffer.len());
+    //
+    //     // Rebuild the request line
+    //     if let Some(method) = &self.method {
+    //         buffer.put_slice(method.as_bytes());
+    //         buffer.put_slice(b" ");
+    //     }
+    //
+    //     if let Some(path) = &self.path {
+    //         buffer.put_slice(path.as_bytes());
+    //     }
+    //
+    //     if let Some(version) = &self.version {
+    //         buffer.put_slice(b" ");
+    //         buffer.put_slice(version.as_bytes());
+    //         buffer.put_slice(b"\r\n");
+    //     }
+    //
+    //     // Rebuild the headers
+    //     for (key, value) in &self.headers {
+    //         buffer.put_slice(key.as_bytes());
+    //         buffer.put_slice(b": ");
+    //         buffer.put_slice(value.as_bytes());
+    //         buffer.put_slice(b"\r\n");
+    //     }
+    //
+    //     // Add a blank line after headers
+    //     buffer.put_slice(b"\r\n");
+    //
+    //     // Optionally, add request body (form parameters)
+    //     if !self.request_params.is_empty() {
+    //         let body = form_urlencoded::Serializer::new(String::new())
+    //             .extend_pairs(self.request_params.iter())
+    //             .finish();
+    //         buffer.put_slice(body.as_bytes());
+    //     }
+    //
+    //     buffer
+    // }
 }
+

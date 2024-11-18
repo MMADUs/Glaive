@@ -326,6 +326,8 @@ dependencies = [
  "bytes",
  "crossbeam-queue",
  "futures",
+ "http",
+ "httparse",
  "libc",
  "lru",
  "nix",
@@ -333,6 +335,7 @@ dependencies = [
  "socket2",
  "thread_local",
  "tokio",
+ "url",
 ]
 
 [[package]]
