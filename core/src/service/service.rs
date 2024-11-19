@@ -1,10 +1,11 @@
 use futures::future;
+use http::method;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
 use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
 use crate::pool::stream::StreamManager;
-use crate::service::buffer::SessionBuffer;
+use crate::service::buffer::BufferSession;
 use crate::service::peer::{PeerNetwork, UpstreamPeer};
 use crate::stream::stream::Stream;
 
@@ -95,38 +96,82 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
         }
     }
 
-    async fn test_handle(&self, mut socket: Stream) -> tokio::io::Result<()> {
-        let mut buffer = vec![0; 1024];
+    async fn test_handle(&self, socket: Stream) -> tokio::io::Result<()> {
+        let mut session = BufferSession::new(socket);
+        let _ = session.read_stream().await;
+        // request version
+        let version = session.get_version();
+        println!("version: {}", version.unwrap_or(""));
+        // request method
+        let method = session.get_method_str();
+        println!("method: {}", method.unwrap_or(""));
+        // request path
+        let path = session.get_path_str();
+        println!("path: {}", path.unwrap_or(""));
+        // get header
+        let appid = session.get_header_str("appid");
+        println!("appid header: {}", appid.unwrap_or(""));
+        // remove header
+        {
+            let _ = session.remove_header("tes".as_bytes());
+            let deleted_header = session.get_header_str("tes");
+            println!("deleted header: {}", deleted_header.unwrap_or(""));
+        }
+        // insert header
+        {
+            session.insert_header("sepuh".as_bytes(), "jeremy".as_bytes());
+            let sepuh = session.get_header_str("sepuh");
+            println!("sepuh header: {}", sepuh.unwrap_or(""));
+        }
+        // get query param
+        let page = session.get_query_param_str("page");
+        println!("query param page: {}", page.unwrap_or(""));
+        let limit = session.get_query_param_str("limit");
+        println!("query param limit: {}", limit.unwrap_or(""));
+        // insert query param
+        {
+            session.insert_query_param("test".as_bytes(), "test-val".as_bytes());
+            let test = session.get_query_param_str("test");
+            println!("insert query test: {}", test.unwrap_or(""));
+        }
+        // remove query param
+        {
+            session.remove_query_param("tes".as_bytes());
+            let deleted_query = session.get_query_param_str("tes");
+            println!("deleted query: {}", deleted_query.unwrap_or(""));
+        }
 
-        // Read the request
-        let n = socket.read(&mut buffer).await?;
-        println!("Received {} bytes", n);
-
-        // Print raw request for debugging
-        println!("Raw request:\n{}", String::from_utf8_lossy(&buffer[..n]));
-
-        // Create JSON response
-        let json_response = r#"{
-        "message": "Hello from Rust Tokio server!",
-        "status": "success"
-        }"#;
-
-        // Create HTTP response
-        let response = format!(
-            "HTTP/1.1 200 OK\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-            json_response.len(),
-            json_response
-        );
-
-        // Write response back to socket
-        socket.write_all(response.as_bytes()).await?;
-        socket.flush().await?;
+        // let mut buffer = vec![0; 1024];
+        //
+        // // Read the request
+        // let n = socket.read(&mut buffer).await?;
+        // println!("Received {} bytes", n);
+        //
+        // // Print raw request for debugging
+        // println!("Raw request:\n{}", String::from_utf8_lossy(&buffer[..n]));
+        //
+        // // Create JSON response
+        // let json_response = r#"{
+        // "message": "Hello from Rust Tokio server!",
+        // "status": "success"
+        // }"#;
+        //
+        // // Create HTTP response
+        // let response = format!(
+        //     "HTTP/1.1 200 OK\r\n\
+        //  Content-Type: application/json\r\n\
+        //  Content-Length: {}\r\n\
+        //  Access-Control-Allow-Origin: *\r\n\
+        //  Connection: close\r\n\
+        //  \r\n\
+        //  {}",
+        //     json_response.len(),
+        //     json_response
+        // );
+        //
+        // // Write response back to socket
+        // socket.write_all(response.as_bytes()).await?;
+        // socket.flush().await?;
 
         println!("Sent response successfully\n");
 
@@ -154,16 +199,16 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                     println!("connection does not exist in pool, new stream created");
                 }
 
-                let mut client_session = SessionBuffer::new(downstream);
-                let mut server_session = SessionBuffer::new(upstream);
-
-                match self
-                    .copy_bidirectional(&mut client_session, &mut server_session)
-                    .await
-                {
-                    Ok(_) => println!("copy bidirectional succeed"),
-                    Err(_) => println!("copy bidirectional failed"),
-                }
+                // let mut client_session = SessionBuffer::new(downstream);
+                // let mut server_session = SessionBuffer::new(upstream);
+                //
+                // match self
+                //     .copy_bidirectional(&mut client_session, &mut server_session)
+                //     .await
+                // {
+                //     Ok(_) => println!("copy bidirectional succeed"),
+                //     Err(_) => println!("copy bidirectional failed"),
+                // }
             }
             Err(_) => println!("error getting stream from pool"),
         }

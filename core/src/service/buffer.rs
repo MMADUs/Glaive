@@ -1,21 +1,20 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use http::header;
 use httparse::{Request, Status};
-use std::collections::HashMap;
 use tokio::io::AsyncReadExt;
 use url::form_urlencoded;
 
-use crate::service::offset::KVRef;
+use crate::service::offset::{BufRef, KVRef};
 use crate::stream::stream::Stream;
 
 pub struct BufferSession {
     pub stream: Stream,
     pub buffer: Bytes,
-    pub method: Option<String>,
-    pub path: Option<Bytes>,  // Now using Bytes instead of String
+    pub method: Option<BufRef>,
+    pub path: Option<BufRef>,
     pub version: Option<String>,
-    pub query_params: Vec<(Bytes, Bytes)>,  // Zero-copy query params as Bytes pairs
-    pub headers: HashMap<Bytes, Bytes>,
+    pub query_params: Vec<KVRef>,
+    pub headers: Vec<KVRef>,
 }
 
 impl BufferSession {
@@ -31,7 +30,7 @@ impl BufferSession {
             path: None,
             version: None,
             query_params: Vec::new(),
-            headers: HashMap::new(),
+            headers: Vec::new(),
         }
     }
 
@@ -44,7 +43,7 @@ impl BufferSession {
             if already_read > Self::MAX_HEADER_SIZE {
                 return Err(tokio::io::Error::new(
                     tokio::io::ErrorKind::Other,
-                    "request larger than {Self::MAX_HEADER_SIZE}",
+                    format!("request larger than {}", Self::MAX_HEADER_SIZE),
                 ));
             }
 
@@ -67,22 +66,39 @@ impl BufferSession {
 
             match req.parse(&init_buffer) {
                 Ok(Status::Complete(s)) => {
-                    // Zero-copy parsing
-                    let base = init_buffer.as_ptr() as usize;
-                    let mut header_refs = Vec::<KVRef>::with_capacity(req.headers.len());
+                    // Store method as BufRef
+                    if let Some(m) = req.method {
+                        let method_start = m.as_ptr() as usize - init_buffer.as_ptr() as usize;
+                        self.method = Some(BufRef::new(method_start, m.len()));
+                    }
 
-                    for header in req.headers.iter() {
-                        if !header.name.is_empty() {
-                            header_refs.push(KVRef::new(
-                                header.name.as_ptr() as usize - base,
-                                header.name.as_bytes().len(),
-                                header.value.as_ptr() as usize - base,
-                                header.value.len(),
-                            ));
+                    // Store path and parse query parameters as BufRefs
+                    if let Some(p) = req.path {
+                        let path_start = p.as_ptr() as usize - init_buffer.as_ptr() as usize;
+                        self.path = Some(BufRef::new(path_start, p.len()));
+
+                        if let Some(query_start) = p.find('?') {
+                            let query_str = &p[query_start + 1..];
+
+                            // Parse query parameters maintaining zero-copy
+                            let pairs = form_urlencoded::parse(query_str.as_bytes());
+                            for (key, value) in pairs {
+                                let key_start =
+                                    key.as_ptr() as usize - init_buffer.as_ptr() as usize;
+                                let value_start =
+                                    value.as_ptr() as usize - init_buffer.as_ptr() as usize;
+
+                                self.query_params.push(KVRef::new(
+                                    key_start,
+                                    key.len(),
+                                    value_start,
+                                    value.len(),
+                                ));
+                            }
                         }
                     }
 
-                    // Version parsing with explicit HTTP version support
+                    // Store version
                     self.version = match req.version {
                         Some(0) => Some("HTTP/1.0".to_string()),
                         Some(1) => Some("HTTP/1.1".to_string()),
@@ -90,36 +106,25 @@ impl BufferSession {
                         _ => Some("HTTP/0.9".to_string()),
                     };
 
-                    // Method parsing
-                    self.method = req.method.map(|m| m.to_uppercase());
+                    // Store headers as KVRefs
+                    for header in req.headers.iter() {
+                        if !header.name.is_empty() {
+                            let name_start =
+                                header.name.as_ptr() as usize - init_buffer.as_ptr() as usize;
+                            let value_start =
+                                header.value.as_ptr() as usize - init_buffer.as_ptr() as usize;
 
-                    // Path parsing with query parameter extraction
-                    if let Some(p) = req.path {
-                        let path_start = p.as_ptr() as usize - base;
-                        let path_len = p.len();
-                        self.path = Some(init_buffer.slice(path_start..(path_start + path_len)));
-
-                        // Query parameter parsing as zero-copy pairs
-                        if let Some(query_str) = p.split('?').nth(1) {
-                            for (key, value) in form_urlencoded::parse(query_str.as_bytes()) {
-                                self.query_params.push((
-                                    Bytes::copy_from_slice(key.as_bytes()),
-                                    Bytes::copy_from_slice(value.as_bytes()),
-                                ));
-                            }
+                            self.headers.push(KVRef::new(
+                                name_start,
+                                header.name.len(),
+                                value_start,
+                                header.value.len(),
+                            ));
                         }
                     }
 
-                    let freezed_buf = init_buffer.freeze();
-
-                    for header in header_refs {
-                        let header_name = header.get_name_bytes(&freezed_buf);
-                        let header_value = header.get_value_bytes(&freezed_buf);
-                        self.headers.insert(header_name, header_value);
-                    }
-
-                    // Freeze buffer to prevent modifications
-                    self.buffer = freezed_buf;
+                    // Store the final buffer
+                    self.buffer = init_buffer.freeze();
                     return Ok(Some(s));
                 }
                 Ok(Status::Partial) => continue,
@@ -130,6 +135,128 @@ impl BufferSession {
                     ))
                 }
             }
+        }
+    }
+
+    pub fn get_method(&self) -> Option<&[u8]> {
+        self.method.as_ref().map(|m| m.get(&self.buffer))
+    }
+
+    pub fn get_method_str(&self) -> Option<&str> {
+        self.get_method()
+            .and_then(|m| std::str::from_utf8(m).ok())
+    }
+
+    pub fn get_path(&self) -> Option<&[u8]> {
+        self.path.as_ref().map(|p| p.get(&self.buffer))
+    }
+
+    pub fn get_path_str(&self) -> Option<&str> {
+        self.get_path()
+            .and_then(|p| std::str::from_utf8(p).ok())
+    }
+
+    pub fn get_version(&self) -> Option<&str> {
+        self.version.as_ref().map(|v| v.as_str())
+    }
+
+    pub fn get_query_param(&self, name: &[u8]) -> Option<&[u8]> {
+        self.query_params
+            .iter()
+            .find(|kv| kv.get_name(&self.buffer) == name)
+            .map(|kv| kv.get_value(&self.buffer))
+    }
+
+    pub fn get_query_param_str(&self, name: &str) -> Option<&str> {
+        self.get_query_param(name.as_bytes())
+            .and_then(|v| std::str::from_utf8(v).ok())
+    }
+
+    pub fn insert_query_param(&mut self, name: &[u8], value: &[u8]) {
+        // Create a new buffer that includes the new data
+        let mut new_buffer = BytesMut::with_capacity(self.buffer.len() + name.len() + value.len());
+        new_buffer.extend_from_slice(&self.buffer);
+        
+        // Add new data at the end and get their offsets
+        let name_start = new_buffer.len();
+        new_buffer.extend_from_slice(name);
+        
+        let value_start = new_buffer.len();
+        new_buffer.extend_from_slice(value);
+
+        // Create new KVRef and add to query_params
+        self.query_params.push(KVRef::new(
+            name_start,
+            name.len(),
+            value_start,
+            value.len(),
+        ));
+
+        // Update the buffer
+        self.buffer = new_buffer.freeze();
+    }
+
+    pub fn remove_query_param(&mut self, name: &[u8]) -> bool {
+        if let Some(index) = self.query_params
+            .iter()
+            .position(|kv| kv.get_name(&self.buffer) == name) 
+        {
+            self.query_params.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    // Headers Operations
+    pub fn get_header(&self, name: &[u8]) -> Option<&[u8]> {
+        self.headers
+            .iter()
+            .find(|kv| kv.get_name(&self.buffer) == name)
+            .map(|kv| kv.get_value(&self.buffer))
+    }
+
+    pub fn get_header_str(&self, name: &str) -> Option<&str> {
+        self.get_header(name.as_bytes())
+            .and_then(|v| std::str::from_utf8(v).ok())
+    }
+
+    pub fn insert_header(&mut self, name: &[u8], value: &[u8]) {
+        // Remove existing header if it exists
+        self.remove_header(name);
+
+        // Create a new buffer that includes the new data
+        let mut new_buffer = BytesMut::with_capacity(self.buffer.len() + name.len() + value.len());
+        new_buffer.extend_from_slice(&self.buffer);
+        
+        // Add new data at the end and get their offsets
+        let name_start = new_buffer.len();
+        new_buffer.extend_from_slice(name);
+        
+        let value_start = new_buffer.len();
+        new_buffer.extend_from_slice(value);
+
+        // Create new KVRef and add to headers
+        self.headers.push(KVRef::new(
+            name_start,
+            name.len(),
+            value_start,
+            value.len(),
+        ));
+
+        // Update the buffer
+        self.buffer = new_buffer.freeze();
+    }
+
+    pub fn remove_header(&mut self, name: &[u8]) -> bool {
+        if let Some(index) = self.headers
+            .iter()
+            .position(|kv| kv.get_name(&self.buffer) == name) 
+        {
+            self.headers.remove(index);
+            true
+        } else {
+            false
         }
     }
 
@@ -194,4 +321,3 @@ impl BufferSession {
     //     buffer
     // }
 }
-
