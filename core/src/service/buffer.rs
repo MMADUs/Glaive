@@ -270,12 +270,14 @@ impl BufferSession {
         // append new buffer with more allocated for the new value
         new_buffer.extend_from_slice(&self.buffer);
 
+        // get the offset
+        let param_start = new_buffer.len();
+        let param_end = value.len();
+
         // append the new value to the new buffer
         new_buffer.extend_from_slice(value);
 
-        // get the offset and store it
-        let param_start = new_buffer.len();
-        let param_end = value.len();
+        // store offset
         let param_offset = Offset::new(param_start, param_end);
         self.query_params.insert(name.to_vec(), param_offset);
 
@@ -349,12 +351,14 @@ impl BufferSession {
         // append new buffer with more allocated for the new value
         new_buffer.extend_from_slice(&self.buffer);
 
+        // get the offset
+        let header_start = new_buffer.len();
+        let header_end = value.len();
+
         // append the new value to the new buffer
         new_buffer.extend_from_slice(value);
 
-        // get the offset and store it
-        let header_start = new_buffer.len();
-        let header_end = value.len();
+        // store offset
         let value_ref = Offset::new(header_start, header_end);
 
         // get header key
