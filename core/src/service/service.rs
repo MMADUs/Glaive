@@ -103,41 +103,41 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
         let version = session.get_version();
         println!("version: {}", version.unwrap_or(""));
         // request method
-        let method = session.get_method_str();
+        let method = session.get_method();
         println!("method: {}", method.unwrap_or(""));
         // request path
-        let path = session.get_path_str();
+        let path = session.get_path();
         println!("path: {}", path.unwrap_or(""));
         // get header
-        let appid = session.get_header_str("appid");
+        let appid = session.get_header("appid");
         println!("appid header: {}", appid.unwrap_or(""));
         // remove header
         {
             let _ = session.remove_header("tes".as_bytes());
-            let deleted_header = session.get_header_str("tes");
+            let deleted_header = session.get_header("tes");
             println!("deleted header: {}", deleted_header.unwrap_or(""));
         }
         // insert header
         {
             session.insert_header("sepuh".as_bytes(), "jeremy".as_bytes());
-            let sepuh = session.get_header_str("sepuh");
+            let sepuh = session.get_header("sepuh");
             println!("sepuh header: {}", sepuh.unwrap_or(""));
         }
         // get query param
-        let page = session.get_query_param_str("page");
+        let page = session.get_query_param("page");
         println!("query param page: {}", page.unwrap_or(""));
-        let limit = session.get_query_param_str("limit");
+        let limit = session.get_query_param("limit");
         println!("query param limit: {}", limit.unwrap_or(""));
         // insert query param
         {
             session.insert_query_param("test".as_bytes(), "test-val".as_bytes());
-            let test = session.get_query_param_str("test");
+            let test = session.get_query_param("test");
             println!("insert query test: {}", test.unwrap_or(""));
         }
         // remove query param
         {
             session.remove_query_param("tes".as_bytes());
-            let deleted_query = session.get_query_param_str("tes");
+            let deleted_query = session.get_query_param("tes");
             println!("deleted query: {}", deleted_query.unwrap_or(""));
         }
 

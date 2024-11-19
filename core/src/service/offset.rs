@@ -1,82 +1,76 @@
 use bytes::Bytes;
 
-/// A `BufRef` is a reference to a buffer of bytes. It removes the need for self-referential data
-/// structures. It is safe to use as long as the underlying buffer does not get mutated.
-///
-/// # Panics
-///
-/// This will panic if an index is out of bounds.
+// the type for the buffer offset management
+// used to implement zero-copy
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct BufRef(pub usize, pub usize);
+pub struct Offset(pub usize, pub usize);
 
-impl BufRef {
-    /// Return a sub-slice of `buf`.
+impl Offset {
+    // new buffer Offset
+    pub fn new(start: usize, len: usize) -> Self {
+        Offset(start, start + len)
+    }
+
+    // return a sub-slice of the buffer based on offset
     pub fn get<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
         &buf[self.0..self.1]
     }
 
-    /// Return a slice of `buf`. This operation is O(1) and increases the reference count of `buf`.
+    // return the buffer slice based on offset
     pub fn get_bytes(&self, buf: &Bytes) -> Bytes {
         buf.slice(self.0..self.1)
     }
 
-    /// Return the size of the slice reference.
+    // return the size of the slice reference
     pub fn len(&self) -> usize {
         self.1 - self.0
     }
 
-    /// Return true if the length is zero.
+    // return true if the length is zero
     pub fn is_empty(&self) -> bool {
         self.1 == self.0
     }
 }
 
-impl BufRef {
-    /// Initialize a `BufRef` that can reference a slice beginning at index `start` and has a
-    /// length of `len`.
-    pub fn new(start: usize, len: usize) -> Self {
-        BufRef(start, start + len)
-    }
-}
-
-/// A `KVRef` contains a key name and value pair, stored as two [BufRef] types.
+// key value pairs consist of buffer offset
+// useful in some scenarios
 #[derive(Clone)]
-pub struct KVRef {
-    name: BufRef,
-    value: BufRef,
+pub struct KVOffset {
+    key: Offset,
+    value: Offset,
 }
 
-impl KVRef {
-    /// Like [BufRef::get] for the name.
-    pub fn get_name<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
-        self.name.get(buf)
+impl KVOffset {
+    // new Key Value Offset
+    pub fn new(key_start: usize, key_end: usize, value_start: usize, value_end: usize) -> Self {
+        KVOffset {
+            key: Offset(key_start, key_start + key_end),
+            value: Offset(value_start, value_start + value_end),
+        }
     }
 
-    /// Like [BufRef::get] for the value.
+    // return the name as raw bytes
+    pub fn get_key<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
+        self.key.get(buf)
+    }
+
+    // return the value as raw bytes
     pub fn get_value<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
         self.value.get(buf)
     }
 
-    /// Like [BufRef::get_bytes] for the name.
-    pub fn get_name_bytes(&self, buf: &Bytes) -> Bytes {
-        self.name.get_bytes(buf)
+    // return the name as sliced bytes
+    pub fn get_key_bytes(&self, buf: &Bytes) -> Bytes {
+        self.key.get_bytes(buf)
     }
 
-    /// Like [BufRef::get_bytes] for the value.
+    // return the value as sliced bytes
     pub fn get_value_bytes(&self, buf: &Bytes) -> Bytes {
         self.value.get_bytes(buf)
     }
 
-    /// Return a new `KVRef` with name and value start indices and lengths.
-    pub fn new(name_s: usize, name_len: usize, value_s: usize, value_len: usize) -> Self {
-        KVRef {
-            name: BufRef(name_s, name_s + name_len),
-            value: BufRef(value_s, value_s + value_len),
-        }
-    }
-
-    /// Return a reference to the value.
-    pub fn value(&self) -> &BufRef {
+    // return a reference to the value
+    pub fn value(&self) -> &Offset {
         &self.value
     }
 }
