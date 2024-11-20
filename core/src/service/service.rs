@@ -9,6 +9,8 @@ use crate::service::buffer::BufferSession;
 use crate::service::peer::{PeerNetwork, UpstreamPeer};
 use crate::stream::stream::Stream;
 
+use http::{Method, StatusCode, Version};
+
 // TESTING traits for customization soon
 pub trait ServiceType: Send + Sync + 'static {
     fn say_hi(&self) -> String;
@@ -97,68 +99,39 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
     }
 
     async fn test_handle(&self, socket: Stream) -> tokio::io::Result<()> {
+        // Example Method
+        let method = Method::GET;
+        let method_str = method.as_str();
+        println!("HTTP Method: {}", method_str);
+
+        // Example Status Code
+        let status = StatusCode::OK;
+        let status_str = status.as_str();
+        println!("HTTP Status Code: {}", status_str);
+        println!("Reason: {}", status.canonical_reason().unwrap_or(""));
+
+        // Example Version
+        let version = Version::HTTP_11;
+        println!("HTTP Version: {:?}", version);
         let mut session = BufferSession::new(socket);
         let _ = session.read_stream().await;
 
-        println!("BEFORE");
-        println!("debug raw bytes: {:?}", session.buffer);
-        println!("");
+        session
+            .headers
+            .append_header("nizwa".as_bytes(), "ganteng".as_bytes());
 
-        let lossy_string = String::from_utf8_lossy(&session.buffer);
-        let cleaned_string = lossy_string.replace("\r\n", " ");
+        session
+            .headers
+            .append_header("athayA".as_bytes(), "cantik".as_bytes());
 
-        println!("debug bytes as str: {:?}", cleaned_string);
-        // request version
-        let version = session.get_version();
-        println!("version: {}", version.unwrap_or(""));
-        // request method
-        let method = session.get_method();
-        println!("method: {}", method.unwrap_or(""));
-        // request path
-        let path = session.get_path();
-        println!("path: {}", path.unwrap_or(""));
-        // get header
-        let appid = session.get_header("appid");
-        println!("appid header: {}", appid.unwrap_or(""));
-        // remove header
-        {
-            let _ = session.remove_header("tes".as_bytes());
-            let deleted_header = session.get_header("tes");
-            println!("deleted header: {}", deleted_header.unwrap_or(""));
-        }
-        // insert header
-        {
-            session.append_header("sepuh".as_bytes(), "jeremy".as_bytes());
-            session.append_header("sepuh".as_bytes(), "jeremy".as_bytes());    
-            let sepuh = session.get_header("sepuh");
-            println!("sepuh header: {}", sepuh.unwrap_or(""));
-        }
-        // // get query param
-        // let page = session.get_query_param("page");
-        // println!("query param page: {}", page.unwrap_or(""));
-        // let limit = session.get_query_param("limit");
-        // println!("query param limit: {}", limit.unwrap_or(""));
-        // // insert query param
-        // {
-        //     session.insert_query_param("test".as_bytes(), "test-val".as_bytes());
-        //     let test = session.get_query_param("test");
-        //     println!("insert query test: {}", test.unwrap_or(""));
-        // }
-        // // remove query param
-        // {
-        //     session.remove_query_param("tes".as_bytes());
-        //     let deleted_query = session.get_query_param("tes");
-        //     println!("deleted query: {}", deleted_query.unwrap_or(""));
-        // }
+        session
+            .headers
+            .append_header("athaya".as_bytes(), "cantik".as_bytes());
 
-        println!("AFTER");
-        println!("debug raw bytes: {:?}", session.buffer);
-        println!("");
-
-        let lossy_string = String::from_utf8_lossy(&session.buffer);
-        let cleaned_string = lossy_string.replace("\r\n", " ");
-
-        println!("debug bytes as str: {:?}", cleaned_string);
+        let appid = session.headers.get_header("appid");
+        println!("appid header value: {}", appid.unwrap_or(""));
+        
+        println!("finished headers: {:?}", session.headers.build());
 
         // let mut buffer = vec![0; 1024];
         //

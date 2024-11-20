@@ -8,11 +8,12 @@ pub struct Offset(pub usize, pub usize);
 impl Offset {
     // new buffer Offset
     pub fn new(start: usize, end: usize) -> Self {
-        Offset(start, start + end)
+        Offset(start, end)
     }
 
     // return a sub-slice of the buffer based on offset
     pub fn get<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
+        println!("offset slice ops > start: {}, end: {}, buf len: {}", self.0, self.1, buf.len());
         &buf[self.0..self.1]
     }
 
