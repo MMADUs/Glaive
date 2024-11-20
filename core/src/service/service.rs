@@ -99,6 +99,15 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
     async fn test_handle(&self, socket: Stream) -> tokio::io::Result<()> {
         let mut session = BufferSession::new(socket);
         let _ = session.read_stream().await;
+
+        println!("BEFORE");
+        println!("debug raw bytes: {:?}", session.buffer);
+        println!("");
+
+        let lossy_string = String::from_utf8_lossy(&session.buffer);
+        let cleaned_string = lossy_string.replace("\r\n", " ");
+
+        println!("debug bytes as str: {:?}", cleaned_string);
         // request version
         let version = session.get_version();
         println!("version: {}", version.unwrap_or(""));
@@ -119,27 +128,37 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
         }
         // insert header
         {
-            session.insert_header("sepuh".as_bytes(), "jeremy".as_bytes());
+            session.append_header("sepuh".as_bytes(), "jeremy".as_bytes());
+            session.append_header("sepuh".as_bytes(), "jeremy".as_bytes());    
             let sepuh = session.get_header("sepuh");
             println!("sepuh header: {}", sepuh.unwrap_or(""));
         }
-        // get query param
-        let page = session.get_query_param("page");
-        println!("query param page: {}", page.unwrap_or(""));
-        let limit = session.get_query_param("limit");
-        println!("query param limit: {}", limit.unwrap_or(""));
-        // insert query param
-        {
-            session.insert_query_param("test".as_bytes(), "test-val".as_bytes());
-            let test = session.get_query_param("test");
-            println!("insert query test: {}", test.unwrap_or(""));
-        }
-        // remove query param
-        {
-            session.remove_query_param("tes".as_bytes());
-            let deleted_query = session.get_query_param("tes");
-            println!("deleted query: {}", deleted_query.unwrap_or(""));
-        }
+        // // get query param
+        // let page = session.get_query_param("page");
+        // println!("query param page: {}", page.unwrap_or(""));
+        // let limit = session.get_query_param("limit");
+        // println!("query param limit: {}", limit.unwrap_or(""));
+        // // insert query param
+        // {
+        //     session.insert_query_param("test".as_bytes(), "test-val".as_bytes());
+        //     let test = session.get_query_param("test");
+        //     println!("insert query test: {}", test.unwrap_or(""));
+        // }
+        // // remove query param
+        // {
+        //     session.remove_query_param("tes".as_bytes());
+        //     let deleted_query = session.get_query_param("tes");
+        //     println!("deleted query: {}", deleted_query.unwrap_or(""));
+        // }
+
+        println!("AFTER");
+        println!("debug raw bytes: {:?}", session.buffer);
+        println!("");
+
+        let lossy_string = String::from_utf8_lossy(&session.buffer);
+        let cleaned_string = lossy_string.replace("\r\n", " ");
+
+        println!("debug bytes as str: {:?}", cleaned_string);
 
         // let mut buffer = vec![0; 1024];
         //

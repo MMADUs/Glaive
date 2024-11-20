@@ -7,8 +7,8 @@ pub struct Offset(pub usize, pub usize);
 
 impl Offset {
     // new buffer Offset
-    pub fn new(start: usize, len: usize) -> Self {
-        Offset(start, start + len)
+    pub fn new(start: usize, end: usize) -> Self {
+        Offset(start, start + end)
     }
 
     // return a sub-slice of the buffer based on offset
