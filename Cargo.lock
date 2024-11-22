@@ -335,7 +335,6 @@ dependencies = [
  "socket2",
  "thread_local",
  "tokio",
- "url",
 ]
 
 [[package]]

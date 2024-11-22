@@ -1,14 +1,14 @@
 use bytes::Bytes;
 
 // the type for the buffer offset management
-// used to implement zero-copy
+// a regular offset can be use anywhere
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Offset(pub usize, pub usize);
 
 impl Offset {
     // new buffer Offset
-    pub fn new(start: usize, end: usize) -> Self {
-        Offset(start, end)
+    pub fn new(start: usize, len: usize) -> Self {
+        Offset(start, start + len)
     }
 
     // return a sub-slice of the buffer based on offset
@@ -33,8 +33,8 @@ impl Offset {
     }
 }
 
-// key value pairs consist of buffer offset
-// useful in some scenarios
+// header buffer offset
+// stores as key value offset
 #[derive(Clone)]
 pub struct KVOffset {
     key: Offset,
@@ -43,10 +43,10 @@ pub struct KVOffset {
 
 impl KVOffset {
     // new Key Value Offset
-    pub fn new(key_start: usize, key_end: usize, value_start: usize, value_end: usize) -> Self {
+    pub fn new(key_start: usize, key_len: usize, value_start: usize, value_len: usize) -> Self {
         KVOffset {
-            key: Offset(key_start, key_start + key_end),
-            value: Offset(value_start, value_start + value_end),
+            key: Offset(key_start, key_start + key_len),
+            value: Offset(value_start, value_start + value_len),
         }
     }
 

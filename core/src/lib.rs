@@ -4,8 +4,7 @@ pub mod service;
 pub mod pool;
 pub mod stream;
 pub mod prelude;
-
-use std::sync::Arc;
+pub mod session;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
