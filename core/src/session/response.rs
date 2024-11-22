@@ -19,9 +19,9 @@ pub type CaseMap = HeaderMap<CaseHeaderName>;
 /// a type for response headers
 #[derive(Debug)]
 pub struct ResponseHeader {
-    metadata: Parts,
-    header_case: CaseMap,
-    reason_phrase: Option<String>,
+    pub metadata: Parts,
+    pub header_case: CaseMap,
+    pub reason_phrase: Option<String>,
 }
 
 impl ResponseHeader {

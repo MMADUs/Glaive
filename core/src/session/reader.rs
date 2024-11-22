@@ -99,6 +99,31 @@ impl BodyReader {
         }
     }
 
+    // check if reader is still on start
+    pub fn is_start(&self) -> bool {
+        matches!(self.read_state, ReadState::Start)
+    }
+
+    // set state to start
+    pub fn re_start(&mut self) {
+        self.read_state = ReadState::Start;
+    }
+
+    // get sliced body by offset
+    pub fn get_sliced_body(&self, offset: &Offset) -> &[u8] {
+        offset.get(self.body_buffer.as_ref().unwrap())
+    }
+
+    // check if the reader is finished
+    pub fn is_finished(&self) -> bool {
+        matches!(self.read_state, ReadState::Completed(_) | ReadState::Done(_))
+    }
+
+    // check if the parsed body is empty
+    pub fn is_body_empty(&self) -> bool {
+        self.read_state == ReadState::Completed(0)
+    }
+
     // initialize buffer
     fn set_buffer(&mut self, buf_to_rewind: &[u8]) {
         let mut buffer = BytesMut::with_capacity(self.body_size);
