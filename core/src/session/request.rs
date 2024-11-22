@@ -16,6 +16,8 @@ const EMPTY_SPACE: &[u8; 1] = b" ";
 
 pub type CaseMap = HeaderMap<CaseHeaderName>;
 
+/// a type for request headers
+#[derive(Debug)]
 pub struct RequestHeader {
     pub metadata: Parts,
     pub header_case: CaseMap,
@@ -23,11 +25,12 @@ pub struct RequestHeader {
 }
 
 impl RequestHeader {
-    pub fn build<M>(method: M, raw_path: &str, version: Version, len: Option<usize>) -> Self
+    /// build a new request headers
+    pub fn build<M>(method: M, raw_path: &str, version: Version, size: Option<usize>) -> Self
     where
         M: TryInto<Method>,
     {
-        let capacity = Self::serve_capacity(len);
+        let capacity = Self::serve_capacity(size);
 
         let method = method
             .try_into()
@@ -51,38 +54,47 @@ impl RequestHeader {
         }
     }
 
-    fn serve_capacity(len: Option<usize>) -> usize {
-        std::cmp::min(len.unwrap_or(INIT_HEADER_SIZE), MAX_HEADER_COUNT)
+    /// helper function used to served the capacity size for request headers
+    fn serve_capacity(size: Option<usize>) -> usize {
+        std::cmp::min(size.unwrap_or(INIT_HEADER_SIZE), MAX_HEADER_COUNT)
     }
 
+    /// get request method
     pub fn get_method(&self) -> &Method {
         &self.metadata.method
     }
 
+    /// get raw request path
     pub fn get_raw_path(&self) -> &[u8] {
         &self.raw_path
     }
 
+    /// get request uri
     pub fn get_uri(&self) -> &Uri {
         &self.metadata.uri
     }
 
-    pub fn get_uri_path(&self) -> &str {
+    /// get request uri path
+    pub fn get_path(&self) -> &str {
         self.metadata.uri.path()
     }
 
+    /// get requset uri host
     pub fn get_host(&self) -> Option<&str> {
         self.metadata.uri.host()
     }
 
+    /// get request uri query parameters
     pub fn get_query(&self) -> Option<&str> {
         self.metadata.uri.query()
     }
 
+    /// get request version
     pub fn get_version(&self) -> &Version {
         &self.metadata.version
     }
 
+    /// get raw request version
     pub fn get_raw_version(&self) -> &str {
         match self.metadata.version {
             Version::HTTP_09 => "HTTP/0.9",
@@ -93,6 +105,8 @@ impl RequestHeader {
         }
     }
 
+    /// append new request header
+    /// this would add a new header without replacing existing header with the same name
     pub fn append_header<N, V>(&mut self, name: N, value: V)
     where
         N: IntoCaseHeaderName,
@@ -116,6 +130,8 @@ impl RequestHeader {
         self.metadata.headers.append(header_name, header_value);
     }
 
+    /// insert new request header
+    /// this would add a new header and replace exisiting header with the same name
     pub fn insert_header<N, V>(&mut self, name: N, value: V)
     where
         N: IntoCaseHeaderName,
@@ -139,6 +155,7 @@ impl RequestHeader {
         self.metadata.headers.insert(header_name, header_value);
     }
 
+    /// remove response header
     pub fn remove_header<'a, N: ?Sized>(&mut self, name: &'a N)
     where
         &'a N: AsHeaderName,
@@ -147,6 +164,8 @@ impl RequestHeader {
         self.metadata.headers.remove(name);
     }
 
+    /// get response headers value
+    /// this would retrive all the headers value with the same name
     pub fn get_headers<N>(&self, name: N) -> Vec<&HeaderValue>
     where
         N: AsHeaderName,
@@ -154,6 +173,8 @@ impl RequestHeader {
         self.metadata.headers.get_all(name).iter().collect()
     }
 
+    /// get response header value
+    /// this would only retrieve one of the header with the same name
     pub fn get_header<N>(&self, name: N) -> Option<&HeaderValue>
     where
         N: AsHeaderName,
@@ -161,18 +182,23 @@ impl RequestHeader {
         self.metadata.headers.get(name)
     }
 
+    /// set request method
     pub fn set_method(&mut self, method: Method) {
         self.metadata.method = method
     }
 
+    /// set request uri
     pub fn set_uri(&mut self, uri: Uri) {
         self.metadata.uri = uri
     }
 
+    /// set request version
     pub fn set_version(&mut self, version: Version) {
         self.metadata.version = version
     }
 
+    /// build request header to buffer
+    /// used wire to session buffer
     pub fn build_to_buffer(&self) -> BytesMut {
         let mut buffer = BytesMut::with_capacity(BUILD_HEADER_BUFFER);
 

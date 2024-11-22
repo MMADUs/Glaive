@@ -16,6 +16,7 @@ const EMPTY_SPACE: &[u8; 1] = b" ";
 
 pub type CaseMap = HeaderMap<CaseHeaderName>;
 
+/// a type for response headers
 #[derive(Debug)]
 pub struct ResponseHeader {
     metadata: Parts,
@@ -24,11 +25,12 @@ pub struct ResponseHeader {
 }
 
 impl ResponseHeader {
-    pub fn build<S>(status_code: S, len: Option<usize>) -> Self
+    /// build a new response header
+    pub fn build<S>(status_code: S, size: Option<usize>) -> Self
     where
         S: TryInto<StatusCode>,
     {
-        let capacity = Self::serve_capacity(len);
+        let capacity = Self::serve_capacity(size);
 
         let status_code = status_code
             .try_into()
@@ -50,22 +52,25 @@ impl ResponseHeader {
         }
     }
 
-    fn serve_capacity(len: Option<usize>) -> usize {
-        std::cmp::min(len.unwrap_or(INIT_HEADER_SIZE), MAX_HEADER_COUNT)
+    /// helper function used to served the capacity size for response headers
+    fn serve_capacity(size: Option<usize>) -> usize {
+        std::cmp::min(size.unwrap_or(INIT_HEADER_SIZE), MAX_HEADER_COUNT)
     }
 
+    /// get response status code
+    ///
+    /// use .as_u16() to get the status as u16
+    /// use .as_str() to get status code as str
     pub fn get_status_code(&self) -> &StatusCode {
         &self.metadata.status
     }
 
-    pub fn get_raw_status_code(&self) -> u16 {
-        self.metadata.status.as_u16()
-    }
-
+    /// get response version
     pub fn get_version(&self) -> &Version {
         &self.metadata.version
     }
 
+    /// get raw response version
     pub fn get_raw_version(&self) -> &str {
         match self.metadata.version {
             Version::HTTP_09 => "HTTP/0.9",
@@ -76,6 +81,8 @@ impl ResponseHeader {
         }
     }
 
+    /// append new response header
+    /// this would add a new header without replacing existing header with the same name
     pub fn append_header<N, V>(&mut self, name: N, value: V)
     where
         N: IntoCaseHeaderName,
@@ -99,6 +106,8 @@ impl ResponseHeader {
         self.metadata.headers.append(header_name, header_value);
     }
 
+    /// insert new response header
+    /// this would add a new header and replace exisiting header with the same name
     pub fn insert_header<N, V>(&mut self, name: N, value: V)
     where
         N: IntoCaseHeaderName,
@@ -122,6 +131,7 @@ impl ResponseHeader {
         self.metadata.headers.insert(header_name, header_value);
     }
 
+    /// remove response header
     pub fn remove_header<'a, N: ?Sized>(&mut self, name: &'a N)
     where
         &'a N: AsHeaderName,
@@ -130,6 +140,8 @@ impl ResponseHeader {
         self.metadata.headers.remove(name);
     }
 
+    /// get response headers value
+    /// this would retrive all the headers value with the same name
     pub fn get_headers<N>(&self, name: N) -> Vec<&HeaderValue>
     where
         N: AsHeaderName,
@@ -137,6 +149,8 @@ impl ResponseHeader {
         self.metadata.headers.get_all(name).iter().collect()
     }
 
+    /// get response header value
+    /// this would only retrieve one of the header with the same name
     pub fn get_header<N>(&self, name: N) -> Option<&HeaderValue>
     where
         N: AsHeaderName,
@@ -144,37 +158,41 @@ impl ResponseHeader {
         self.metadata.headers.get(name)
     }
 
+    /// set response version
     pub fn set_version(&mut self, version: Version) {
         self.metadata.version = version
     }
 
-    pub fn set_status_code(&mut self, status: impl TryInto<StatusCode>) -> Result<(), ()> {
+    /// set response status code
+    pub fn set_status_code<S>(&mut self, status: S)
+    where
+        S: TryInto<StatusCode>,
+    {
         self.metadata.status = status
             .try_into()
             .map_err(|_| format!("Invalid status code"))
-            .expect("Failed to convert status code");
-
-        Ok(())
+            .expect("Failed to convert status code")
     }
 
-    pub fn set_reason_phrase(&mut self, reason_phrase: Option<&str>) -> Result<(), ()> {
-        // No need to allocate memory to store the phrase if it is the default one.
+    /// set reason phrase for the given status
+    pub fn set_reason_phrase(&mut self, reason_phrase: Option<&str>) {
         if reason_phrase == self.metadata.status.canonical_reason() {
             self.reason_phrase = None;
-            return Ok(());
+            return;
         }
-
-        // TODO: validate it "*( HTAB / SP / VCHAR / obs-text )"
         self.reason_phrase = reason_phrase.map(str::to_string);
-        Ok(())
     }
 
+    /// get response reason phrase
+    /// when the reason phrase is not set, otherwise use the default reason
     pub fn get_reason_phrase(&self) -> Option<&str> {
         self.reason_phrase
             .as_deref()
             .or_else(|| self.metadata.status.canonical_reason())
     }
 
+    /// build response header to buffer
+    /// used wire to session buffer
     pub fn build_to_buffer(&self) -> BytesMut {
         let mut buffer = BytesMut::with_capacity(BUILD_HEADER_BUFFER);
 
@@ -206,5 +224,4 @@ impl ResponseHeader {
 
         buffer
     }
-
 }
