@@ -1,32 +1,53 @@
+use std::time::Duration;
+
 use crate::stream::stream::Stream;
 use bytes::{Bytes, BytesMut};
 use http::header::AsHeaderName;
-use http::{HeaderValue, Method, StatusCode, Version};
+use http::{HeaderValue, Method, StatusCode, Uri, Version};
 use httparse::{Request, Status};
 use nix::NixPath;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use super::case::IntoCaseHeaderName;
 use super::offset::{KVOffset, Offset};
 use super::reader::BodyReader;
 use super::request::RequestHeader;
 use super::response::ResponseHeader;
-use super::utils::Utils;
+use super::utils::{KeepaliveStatus, Utils};
 use super::writer::BodyWriter;
 
 const INIT_BUFFER_SIZE: usize = 1024;
 const MAX_BUFFER_SIZE: usize = 8192;
 const MAX_HEADERS_COUNT: usize = 256;
 
+/// http 1.x downstream session
+/// having a full control of the downstream here.
 pub struct Downstream {
+    // downstream (client) socket stream
     pub stream: Stream,
+    // raw buffer for stream parse
     pub buffer: Bytes,
+    // raw buffer request headers & body offset
     pub buf_headers_offset: Option<Offset>,
     pub buf_body_offset: Option<Offset>,
+    // request & response headers
     pub request_headers: Option<RequestHeader>,
     pub response_headers: Option<ResponseHeader>,
+    // request body reader & writer
     pub body_writer: BodyWriter,
     pub body_reader: BodyReader,
-    pub buf_size_sent: usize,
+    // tracks size of bytes write and read to downstream
+    pub buffer_size_sent: usize,
+    pub buffer_size_read: usize,
+    // connection keepalive timeout
+    pub keepalive_timeout: KeepaliveStatus,
+    // buffer write & read timeout
+    pub read_timeout: Option<Duration>,
+    pub write_timeout: Option<Duration>,
+    // flag if request is an upgrade request
+    pub upgrade: bool,
+    // flag if response header is ignore (not proxied to downstream)
+    pub ignore_response_headers: bool,
 }
 
 impl Downstream {
@@ -40,7 +61,13 @@ impl Downstream {
             response_headers: None,
             body_writer: BodyWriter::new(),
             body_reader: BodyReader::new(),
-            buf_size_sent: 0,
+            buffer_size_sent: 0,
+            buffer_size_read: 0,
+            keepalive_timeout: KeepaliveStatus::Off,
+            read_timeout: None,
+            write_timeout: None,
+            upgrade: false,
+            ignore_response_headers: false,
         }
     }
 
@@ -60,6 +87,7 @@ impl Downstream {
                 ));
             }
 
+            // TODO: add read timeouts here
             let len = match self.stream.read_buf(&mut read_buffer).await {
                 Ok(0) if read_buf_size > 0 => {
                     return Err(tokio::io::Error::new(
@@ -144,8 +172,57 @@ impl Downstream {
 
     /// # REQUEST HEADERS OPERATIONS
     ///
+    /// append request header
+    pub fn append_header<N, V>(&mut self, name: N, value: V)
+    where
+        N: IntoCaseHeaderName,
+        V: TryInto<HeaderValue>,
+    {
+        self.request_headers
+            .as_mut()
+            .expect("Request header is not read yet")
+            .append_header(name, value);
+    }
+
+    /// insert request header
+    pub fn insert_header<N, V>(&mut self, name: N, value: V)
+    where
+        N: IntoCaseHeaderName,
+        V: TryInto<HeaderValue>,
+    {
+        self.request_headers
+            .as_mut()
+            .expect("Request header is not read yet")
+            .insert_header(name, value);
+    }
+
+    /// remove request header
+    pub fn remove_header<'a, N: ?Sized>(&mut self, name: &'a N)
+    where
+        &'a N: AsHeaderName,
+    {
+        self.request_headers
+            .as_mut()
+            .expect("Request header is not read yet")
+            .remove_header(name);
+    }
+
+    /// get request headers
+    pub fn get_headers<N>(&self, name: N) -> Vec<&HeaderValue>
+    where
+        N: AsHeaderName,
+    {
+        self.request_headers
+            .as_ref()
+            .expect("Request header is not read yet")
+            .get_headers(name)
+    }
+
     /// get request header
-    pub fn get_header(&self, name: impl AsHeaderName) -> Option<&HeaderValue> {
+    pub fn get_header<N>(&self, name: N) -> Option<&HeaderValue>
+    where
+        N: AsHeaderName,
+    {
         self.request_headers
             .as_ref()
             .expect("Request header is not read yet")
@@ -158,6 +235,30 @@ impl Downstream {
             .as_ref()
             .expect("Request header is not read yet")
             .get_version()
+    }
+
+    /// get request method
+    pub fn get_method(&self) -> &Method {
+        self.request_headers
+            .as_ref()
+            .expect("Request header is not read yet")
+            .get_method()
+    }
+
+    /// get the raw request path
+    pub fn get_raw_path(&self) -> &[u8] {
+        self.request_headers
+            .as_ref()
+            .expect("Request header is not read yet")
+            .get_raw_path()
+    }
+
+    /// get the request uri
+    pub fn get_uri(&self) -> &Uri {
+        self.request_headers
+            .as_ref()
+            .expect("Request header is not read yet")
+            .get_uri()
     }
 
     /// # READ OPERATIONS
@@ -206,11 +307,15 @@ impl Downstream {
             let content_length = Utils::get_content_length_value(content_length_value);
 
             match content_length {
-                Some(length) => self.body_reader.with_content_length_read(length, body_bytes),
+                Some(length) => self
+                    .body_reader
+                    .with_content_length_read(length, body_bytes),
                 None => {
                     let version = *self.get_version();
                     match version {
-                        Version::HTTP_11 => self.body_reader.with_content_length_read(0, body_bytes),
+                        Version::HTTP_11 => {
+                            self.body_reader.with_content_length_read(0, body_bytes)
+                        }
                         _ => self.body_reader.with_until_closed_read(body_bytes),
                     }
                 }
@@ -222,6 +327,7 @@ impl Downstream {
     /// the readed body buffer is iniside the body reader, so we received the offset
     pub async fn read_request_body(&mut self) -> tokio::io::Result<Option<Offset>> {
         self.set_request_body_reader();
+        // TODO: add read timeouts here
         self.body_reader.read_body(&mut self.stream).await
     }
 
@@ -240,9 +346,21 @@ impl Downstream {
                 let sliced = self.read_sliced_request_body(&offset).await;
                 let bytes = Bytes::copy_from_slice(sliced);
                 Ok(Some(bytes))
-            },
+            }
             None => Ok(None),
         }
+    }
+
+    /// check if the reading process of the request body is finished
+    pub async fn is_reading_request_body_finished(&mut self) -> bool {
+        self.set_request_body_reader();
+        self.body_reader.is_finished()
+    }
+
+    /// check if the request body is empty
+    pub async fn is_request_body_empty(&mut self) -> bool {
+        self.set_request_body_reader();
+        self.body_reader.is_body_empty()
     }
 
     /// # WRITE OPERATIONS
@@ -255,10 +373,11 @@ impl Downstream {
     ) -> tokio::io::Result<()> {
         // TODO: do some validation here before writing response headers
         let mut resp_buf = headers.build_to_buffer();
+        // TODO: add write timeouts here
         match self.stream.write_all(&mut resp_buf).await {
             Ok(()) => {
                 self.response_headers = Some(headers); // idk why i store resp headers.
-                self.buf_size_sent += resp_buf.len();
+                self.buffer_size_sent += resp_buf.len();
                 Ok(())
             }
             Err(e) => {
@@ -275,7 +394,7 @@ impl Downstream {
         if matches!(
             header.metadata.status,
             StatusCode::NO_CONTENT | StatusCode::NOT_MODIFIED
-        ) || self.get_method() == Some(&Method::HEAD)
+        ) || self.get_method() == &Method::HEAD
         {
             self.body_writer.with_content_length_write(0);
             return;
@@ -309,12 +428,12 @@ impl Downstream {
     }
 
     /// write response body to downstream
-    /// TODO: add write timeout
     pub async fn write_response_body(&mut self, buffer: &[u8]) -> tokio::io::Result<Option<usize>> {
+        // TODO: add write timeouts here
         let size_written = self.body_writer.write_body(&mut self.stream, buffer).await;
 
         if let Ok(Some(sent)) = size_written {
-            self.buf_size_sent += sent;
+            self.buffer_size_sent += sent;
         }
 
         size_written

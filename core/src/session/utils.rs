@@ -1,3 +1,12 @@
+use std::time::Duration;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeepaliveStatus {
+    Timeout(Duration),
+    Infinite,
+    Off,
+}
+
 pub struct Utils;
 
 impl Utils {

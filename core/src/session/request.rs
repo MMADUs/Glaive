@@ -70,23 +70,12 @@ impl RequestHeader {
     }
 
     /// get request uri
+    /// 
+    /// use .path() to get uri path as &str
+    /// use .host() to get uri host as &str
+    /// use .query() to get uri query param as &str
     pub fn get_uri(&self) -> &Uri {
         &self.metadata.uri
-    }
-
-    /// get request uri path
-    pub fn get_path(&self) -> &str {
-        self.metadata.uri.path()
-    }
-
-    /// get requset uri host
-    pub fn get_host(&self) -> Option<&str> {
-        self.metadata.uri.host()
-    }
-
-    /// get request uri query parameters
-    pub fn get_query(&self) -> Option<&str> {
-        self.metadata.uri.query()
     }
 
     /// get request version
