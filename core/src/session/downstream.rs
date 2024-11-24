@@ -46,6 +46,8 @@ pub struct Downstream {
     pub write_timeout: Option<Duration>,
     // flag if request is an upgrade request
     pub upgrade: bool,
+    // flag if response header is modified
+    pub update_response_headers: bool,
     // flag if response header is ignore (not proxied to downstream)
     pub ignore_response_headers: bool,
 }
@@ -67,6 +69,7 @@ impl Downstream {
             read_timeout: None,
             write_timeout: None,
             upgrade: false,
+            update_response_headers: true,
             ignore_response_headers: false,
         }
     }
@@ -290,11 +293,14 @@ impl Downstream {
             // }
 
             let body_bytes = self.buf_body_offset.as_ref().unwrap().get(&self.buffer[..]);
-            // if self.req_header().version == Version::HTTP_11 && self.is_upgrade_req() {
-            //     self.body_reader.init_http10(preread_body);
-            //     return;
-            // }
 
+            // check if request is an upgrade
+            let version = *self.get_version();
+            if version == Version::HTTP_11 && self.is_request_upgrade() {
+                self.body_reader.with_until_closed_read(body_bytes);
+            }
+
+            // check if request is transfer encoding
             let transfer_encoding_value = self.get_header(http::header::TRANSFER_ENCODING);
             let transfer_encoding = Utils::is_header_value_chunk_encoding(transfer_encoding_value);
 
@@ -303,6 +309,7 @@ impl Downstream {
                 return;
             }
 
+            // check if request has content length
             let content_length_value = self.get_header(http::header::CONTENT_LENGTH);
             let content_length = Utils::get_content_length_value(content_length_value);
 
@@ -371,11 +378,57 @@ impl Downstream {
         &mut self,
         headers: ResponseHeader,
     ) -> tokio::io::Result<()> {
-        // TODO: do some validation here before writing response headers
+        // check if response headers should be ignored
+        if headers.metadata.status.is_informational()
+            && self.is_ignoring_response_headers(headers.get_status_code().as_u16())
+        {
+            return Ok(());
+        }
+
+        // check if response headers already sent, cannot send again
+        if let Some(response_headers) = self.response_headers.as_ref() {
+            if !response_headers.metadata.status.is_informational() || self.upgrade {
+                return Ok(());
+            }
+        }
+
+        // TODO: make keepalive session utils
+        if !headers.metadata.status.is_informational() && self.update_response_headers {
+            headers.insert_header(http::header::DATE, "?");
+
+            let connection_value = if self.will_keepalive() {
+                "keep-alive"
+            } else {
+                "close"
+            };
+            headers.insert_header(http::header::CONNECTION, connection_value);
+        }
+
+        if headers.metadata.status == 101 {
+            // close connection when upgrade happens
+            self.set_keepalive(None);
+        }
+
+        if headers.metadata.status == 101 || !headers.metadata.status.is_informational() {
+            if self.is_session_upgrade(&headers) {
+                self.upgrade = true;
+            } else {
+                self.body_reader.with_content_length_read(0, b"");
+            }
+            self.set_response_body_writer(&headers);
+        };
+
+        let flush = headers.metadata.status.is_informational()
+            || headers.get_header(http::header::CONTENT_LENGTH).is_none();
+
         let mut resp_buf = headers.build_to_buffer();
         // TODO: add write timeouts here
         match self.stream.write_all(&mut resp_buf).await {
             Ok(()) => {
+                if flush || self.body_writer.finished() {
+                    self.stream.flush().await?;
+                }
+
                 self.response_headers = Some(headers); // idk why i store resp headers.
                 self.buffer_size_sent += resp_buf.len();
                 Ok(())
@@ -404,6 +457,12 @@ impl Downstream {
         if header.metadata.status.is_informational()
             && header.metadata.status != StatusCode::SWITCHING_PROTOCOLS
         {
+            return;
+        }
+
+        // check if session is upgrade
+        if self.is_session_upgrade(header) {
+            self.body_writer.with_until_closed_write();
             return;
         }
 
@@ -446,5 +505,38 @@ impl Downstream {
         self.stream.flush().await?;
         // self.maybe_force_close_body_reader();
         Ok(res)
+    }
+
+    /// check if the request is an request upgrade
+    pub fn is_request_upgrade(&self) -> bool {
+        let req_header = self
+            .request_headers
+            .as_ref()
+            .expect("Request is not read yet");
+        Utils::is_request_upgrade(req_header)
+    }
+
+    /// check if the session (request & response) is an upgrade
+    pub fn is_session_upgrade(&self, resp_header: &ResponseHeader) -> bool {
+        match self.is_request_upgrade() {
+            true => Utils::is_response_upgrade(resp_header),
+            false => false,
+        }
+    }
+
+    /// check if request is expect continue
+    pub fn is_request_expect_continue(&self) -> bool {
+        let req_header = self
+            .request_headers
+            .as_ref()
+            .expect("Request is not read yet");
+        Utils::is_request_expect_continue(req_header)
+    }
+
+    /// check if we should ignore response headers
+    pub fn is_ignoring_response_headers(&self, status: u16) -> bool {
+        self.ignore_response_headers
+            && status != 100
+            && !(status == 100 && self.is_request_expect_continue())
     }
 }
