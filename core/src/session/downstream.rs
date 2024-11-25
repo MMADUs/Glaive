@@ -5,7 +5,6 @@ use bytes::{Bytes, BytesMut};
 use http::header::AsHeaderName;
 use http::{HeaderValue, Method, StatusCode, Uri, Version};
 use httparse::{Request, Status};
-use nix::NixPath;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::case::IntoCaseHeaderName;
@@ -74,8 +73,6 @@ impl Downstream {
         }
     }
 
-    /// # PARSE OPERATIONS
-    ///
     /// read request from downstream and parse to session type
     pub async fn read_request(&mut self) -> tokio::io::Result<()> {
         self.buffer.clear();
@@ -172,9 +169,11 @@ impl Downstream {
             }
         }
     }
+}
 
-    /// # REQUEST HEADERS OPERATIONS
-    ///
+/// implementation for downstream request header
+/// helper function
+impl Downstream {
     /// append request header
     pub fn append_header<N, V>(&mut self, name: N, value: V)
     where
@@ -263,9 +262,11 @@ impl Downstream {
             .expect("Request header is not read yet")
             .get_uri()
     }
+}
 
-    /// # READ OPERATIONS
-    ///
+/// implementation for read operations
+/// with read helper function
+impl Downstream {
     /// get the parsed request headers
     /// both will result in panic if request is not readed yet
     ///
@@ -370,13 +371,23 @@ impl Downstream {
         self.body_reader.is_body_empty()
     }
 
-    /// # WRITE OPERATIONS
-    ///
+    /// force close request body reader
+    pub fn force_close_request_body_reader(&mut self) {
+        if self.upgrade && !self.body_reader.is_finished() {
+            // reset to close
+            self.body_reader.with_content_length_read(0, b"");
+        }
+    }
+}
+
+/// implementation for write opeations
+/// with write helper function
+impl Downstream {
     /// send a response headers to downstream
     /// this can be called multiple times e.g during error and writing resposne from upstream
     pub async fn write_response_headers(
         &mut self,
-        headers: ResponseHeader,
+        mut headers: ResponseHeader,
     ) -> tokio::io::Result<()> {
         // check if response headers should be ignored
         if headers.metadata.status.is_informational()
@@ -394,9 +405,11 @@ impl Downstream {
 
         // TODO: make keepalive session utils
         if !headers.metadata.status.is_informational() && self.update_response_headers {
-            headers.insert_header(http::header::DATE, "?");
+            let timestamp = std::time::SystemTime::now();
+            let http_date = httpdate::fmt_http_date(timestamp);
+            headers.insert_header(http::header::DATE, http_date);
 
-            let connection_value = if self.will_keepalive() {
+            let connection_value = if self.is_session_keepalive() {
                 "keep-alive"
             } else {
                 "close"
@@ -503,10 +516,14 @@ impl Downstream {
     pub async fn finish_writing_response_body(&mut self) -> tokio::io::Result<Option<usize>> {
         let res = self.body_writer.finish(&mut self.stream).await?;
         self.stream.flush().await?;
-        // self.maybe_force_close_body_reader();
+        self.force_close_request_body_reader();
         Ok(res)
     }
+}
 
+/// implementation for extra utilities
+/// helper function to work with downstream
+impl Downstream {
     /// check if the request is an request upgrade
     pub fn is_request_upgrade(&self) -> bool {
         let req_header = self
@@ -538,5 +555,60 @@ impl Downstream {
         self.ignore_response_headers
             && status != 100
             && !(status == 100 && self.is_request_expect_continue())
+    }
+
+    /// set downstream keepalive timeout
+    pub fn set_keepalive(&mut self, seconds: Option<u64>) {
+        match seconds {
+            Some(sec) => {
+                if sec > 0 {
+                    self.keepalive_timeout = KeepaliveStatus::Timeout(Duration::from_secs(sec));
+                } else {
+                    self.keepalive_timeout = KeepaliveStatus::Infinite;
+                }
+            }
+            None => {
+                self.keepalive_timeout = KeepaliveStatus::Off;
+            }
+        }
+    }
+
+    /// check if downstream session keepalive is active
+    pub fn is_session_keepalive(&self) -> bool {
+        !matches!(self.keepalive_timeout, KeepaliveStatus::Off)
+    }
+
+    /// check if connection keepalive
+    pub fn is_connection_keepalive(&self) -> Option<bool> {
+        if let Some(value) = self.get_header(http::header::CONNECTION) {
+            return Utils::is_connection_keepalive(value);
+        }
+        None
+    }
+
+    /// get keepalive value from socket stream
+    /// TODO: get actual values
+    pub fn get_keepalive_value(&self) -> (Option<u64>, Option<usize>) {
+        (None, None)
+    }
+
+    /// apply session keepalive timeout
+    pub fn apply_session_keepalive(&mut self) {
+        if let Some(keepalive) = self.is_connection_keepalive() {
+            if keepalive {
+                let (timeout, _max_use) = self.get_keepalive_value();
+
+                match timeout {
+                    Some(timeout) => self.set_keepalive(Some(timeout)),
+                    None => self.set_keepalive(Some(0)), // infinite ?
+                }
+            } else {
+                self.set_keepalive(None);
+            }
+        } else if *self.get_version() == http::Version::HTTP_11 {
+            self.set_keepalive(Some(0)); // on by default for http 1.1
+        } else {
+            self.set_keepalive(None); // off by default for http 1.0
+        }
     }
 }

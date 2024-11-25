@@ -9,6 +9,35 @@ pub enum KeepaliveStatus {
     Off,
 }
 
+struct ConnectionValue {
+    keep_alive: bool,
+    upgrade: bool,
+    close: bool,
+}
+
+impl ConnectionValue {
+    fn new() -> Self {
+        ConnectionValue {
+            keep_alive: false,
+            upgrade: false,
+            close: false,
+        }
+    }
+
+    fn close(mut self) -> Self {
+        self.close = true;
+        self
+    }
+    fn upgrade(mut self) -> Self {
+        self.upgrade = true;
+        self
+    }
+    fn keep_alive(mut self) -> Self {
+        self.keep_alive = true;
+        self
+    }
+}
+
 pub struct Utils;
 
 impl Utils {
@@ -79,6 +108,62 @@ impl Utils {
             None => false,
         };
         // qualifies the expect continue request
-        version == http::Version::HTTP_11 && valid 
+        version == http::Version::HTTP_11 && valid
+    }
+
+    /// parse the connection header
+    fn parse_connection_header(value: &[u8]) -> ConnectionValue {
+        const KEEP_ALIVE: &str = "keep-alive";
+        const CLOSE: &str = "close";
+        const UPGRADE: &str = "upgrade";
+
+        // fast path
+        if value.eq_ignore_ascii_case(CLOSE.as_bytes()) {
+            ConnectionValue::new().close()
+        } else if value.eq_ignore_ascii_case(KEEP_ALIVE.as_bytes()) {
+            ConnectionValue::new().keep_alive()
+        } else if value.eq_ignore_ascii_case(UPGRADE.as_bytes()) {
+            ConnectionValue::new().upgrade()
+        } else {
+            // slow path, parse the connection value
+            let mut close = false;
+            let mut upgrade = false;
+            let value = std::str::from_utf8(value).unwrap_or("");
+
+            for token in value
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|&x| !x.is_empty())
+            {
+                if token.eq_ignore_ascii_case(CLOSE) {
+                    close = true;
+                } else if token.eq_ignore_ascii_case(UPGRADE) {
+                    upgrade = true;
+                }
+                if upgrade && close {
+                    return ConnectionValue::new().upgrade().close();
+                }
+            }
+
+            if close {
+                ConnectionValue::new().close()
+            } else if upgrade {
+                ConnectionValue::new().upgrade()
+            } else {
+                ConnectionValue::new()
+            }
+        }
+    }
+
+    /// check if session keepalive by checking the connection header
+    pub fn is_connection_keepalive(header_value: &http::header::HeaderValue) -> Option<bool> {
+        let value = Self::parse_connection_header(header_value.as_bytes());
+        if value.keep_alive {
+            Some(true)
+        } else if value.close {
+            Some(false)
+        } else {
+            None
+        }
     }
 }
