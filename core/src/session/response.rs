@@ -26,7 +26,7 @@ pub struct ResponseHeader {
 
 impl ResponseHeader {
     /// build a new response header
-    pub fn build<S>(status_code: S, size: Option<usize>) -> Self
+    pub fn build<S>(status_code: S, version: Version, size: Option<usize>) -> Self
     where
         S: TryInto<StatusCode>,
     {
@@ -39,6 +39,7 @@ impl ResponseHeader {
 
         let (mut parts, _) = Response::builder()
             .status(status_code)
+            .version(version)
             .body(())
             .expect("Failed to create response metadata")
             .into_parts();

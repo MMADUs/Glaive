@@ -7,13 +7,15 @@ use http::{HeaderValue, Method, StatusCode, Uri, Version};
 use httparse::{Request, Status};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::case::IntoCaseHeaderName;
-use super::offset::{KVOffset, Offset};
-use super::reader::BodyReader;
-use super::request::RequestHeader;
-use super::response::ResponseHeader;
-use super::utils::{KeepaliveStatus, Utils};
-use super::writer::BodyWriter;
+use super::{
+    case::IntoCaseHeaderName,
+    offset::{KVOffset, Offset},
+    reader::BodyReader,
+    request::RequestHeader,
+    response::ResponseHeader,
+    utils::{KeepaliveStatus, Utils},
+    writer::BodyWriter,
+};
 
 const INIT_BUFFER_SIZE: usize = 1024;
 const MAX_BUFFER_SIZE: usize = 8192;
@@ -30,14 +32,14 @@ pub struct Downstream {
     pub buf_headers_offset: Option<Offset>,
     pub buf_body_offset: Option<Offset>,
     // request & response headers
-    pub request_headers: Option<RequestHeader>,
-    pub response_headers: Option<ResponseHeader>,
+    pub request_header: Option<RequestHeader>,
+    pub response_header: Option<ResponseHeader>,
     // request body reader & writer
     pub body_writer: BodyWriter,
     pub body_reader: BodyReader,
-    // tracks size of bytes write and read to downstream
-    pub buffer_size_sent: usize,
-    pub buffer_size_read: usize,
+    // tracks size of buffer write and read to downstream
+    pub buf_write_size: usize,
+    pub buf_read_size: usize,
     // connection keepalive timeout
     pub keepalive_timeout: KeepaliveStatus,
     // buffer write & read timeout
@@ -52,18 +54,19 @@ pub struct Downstream {
 }
 
 impl Downstream {
+    /// new downstream session
     pub fn new(s: Stream) -> Self {
         Downstream {
             stream: s,
             buffer: Bytes::new(),
             buf_headers_offset: None,
             buf_body_offset: None,
-            request_headers: None,
-            response_headers: None,
+            request_header: None,
+            response_header: None,
             body_writer: BodyWriter::new(),
             body_reader: BodyReader::new(),
-            buffer_size_sent: 0,
-            buffer_size_read: 0,
+            buf_write_size: 0,
+            buf_read_size: 0,
             keepalive_timeout: KeepaliveStatus::Off,
             read_timeout: None,
             write_timeout: None,
@@ -155,7 +158,10 @@ impl Downstream {
                     }
 
                     self.buffer = buffer_bytes;
-                    self.request_headers = Some(request_header);
+                    self.request_header = Some(request_header);
+                    self.body_reader.re_start();
+                    self.response_header = None;
+                    self.apply_session_keepalive();
 
                     return Ok(());
                 }
@@ -180,7 +186,7 @@ impl Downstream {
         N: IntoCaseHeaderName,
         V: TryInto<HeaderValue>,
     {
-        self.request_headers
+        self.request_header
             .as_mut()
             .expect("Request header is not read yet")
             .append_header(name, value);
@@ -192,7 +198,7 @@ impl Downstream {
         N: IntoCaseHeaderName,
         V: TryInto<HeaderValue>,
     {
-        self.request_headers
+        self.request_header
             .as_mut()
             .expect("Request header is not read yet")
             .insert_header(name, value);
@@ -203,7 +209,7 @@ impl Downstream {
     where
         &'a N: AsHeaderName,
     {
-        self.request_headers
+        self.request_header
             .as_mut()
             .expect("Request header is not read yet")
             .remove_header(name);
@@ -214,7 +220,7 @@ impl Downstream {
     where
         N: AsHeaderName,
     {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
             .get_headers(name)
@@ -225,7 +231,7 @@ impl Downstream {
     where
         N: AsHeaderName,
     {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
             .get_header(name)
@@ -233,7 +239,7 @@ impl Downstream {
 
     /// get request version
     pub fn get_version(&self) -> &Version {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
             .get_version()
@@ -241,7 +247,7 @@ impl Downstream {
 
     /// get request method
     pub fn get_method(&self) -> &Method {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
             .get_method()
@@ -249,7 +255,7 @@ impl Downstream {
 
     /// get the raw request path
     pub fn get_raw_path(&self) -> &[u8] {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
             .get_raw_path()
@@ -257,7 +263,7 @@ impl Downstream {
 
     /// get the request uri
     pub fn get_uri(&self) -> &Uri {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
             .get_uri()
@@ -272,13 +278,13 @@ impl Downstream {
     ///
     /// the retrieved request header will be used to write to upstream
     pub fn get_request_headers(&self) -> &RequestHeader {
-        self.request_headers
+        self.request_header
             .as_ref()
             .expect("Request header is not read yet")
     }
 
     pub fn get_mut_request_headers(&mut self) -> &mut RequestHeader {
-        self.request_headers
+        self.request_header
             .as_mut()
             .expect("Request header is not read yet")
     }
@@ -353,6 +359,7 @@ impl Downstream {
             Some(offset) => {
                 let sliced = self.read_sliced_request_body(&offset).await;
                 let bytes = Bytes::copy_from_slice(sliced);
+                self.buf_read_size += bytes.len();
                 Ok(Some(bytes))
             }
             None => Ok(None),
@@ -383,82 +390,12 @@ impl Downstream {
 /// implementation for write opeations
 /// with write helper function
 impl Downstream {
-    /// send a response headers to downstream
-    /// this can be called multiple times e.g during error and writing resposne from upstream
-    pub async fn write_response_headers(
-        &mut self,
-        mut headers: ResponseHeader,
-    ) -> tokio::io::Result<()> {
-        // check if response headers should be ignored
-        if headers.metadata.status.is_informational()
-            && self.is_ignoring_response_headers(headers.get_status_code().as_u16())
-        {
-            return Ok(());
-        }
-
-        // check if response headers already sent, cannot send again
-        if let Some(response_headers) = self.response_headers.as_ref() {
-            if !response_headers.metadata.status.is_informational() || self.upgrade {
-                return Ok(());
-            }
-        }
-
-        // TODO: make keepalive session utils
-        if !headers.metadata.status.is_informational() && self.update_response_headers {
-            let timestamp = std::time::SystemTime::now();
-            let http_date = httpdate::fmt_http_date(timestamp);
-            headers.insert_header(http::header::DATE, http_date);
-
-            let connection_value = if self.is_session_keepalive() {
-                "keep-alive"
-            } else {
-                "close"
-            };
-            headers.insert_header(http::header::CONNECTION, connection_value);
-        }
-
-        if headers.metadata.status == 101 {
-            // close connection when upgrade happens
-            self.set_keepalive(None);
-        }
-
-        if headers.metadata.status == 101 || !headers.metadata.status.is_informational() {
-            if self.is_session_upgrade(&headers) {
-                self.upgrade = true;
-            } else {
-                self.body_reader.with_content_length_read(0, b"");
-            }
-            self.set_response_body_writer(&headers);
-        };
-
-        let flush = headers.metadata.status.is_informational()
-            || headers.get_header(http::header::CONTENT_LENGTH).is_none();
-
-        let mut resp_buf = headers.build_to_buffer();
-        // TODO: add write timeouts here
-        match self.stream.write_all(&mut resp_buf).await {
-            Ok(()) => {
-                if flush || self.body_writer.finished() {
-                    self.stream.flush().await?;
-                }
-
-                self.response_headers = Some(headers); // idk why i store resp headers.
-                self.buffer_size_sent += resp_buf.len();
-                Ok(())
-            }
-            Err(e) => {
-                let error = format!("error writing response header: {:>}", e);
-                Err(tokio::io::Error::new(tokio::io::ErrorKind::Other, error))
-            }
-        }
-    }
-
     /// after receiving response header from upstream
     /// set the response body write mode
-    pub async fn set_response_body_writer(&mut self, header: &ResponseHeader) {
+    pub async fn set_response_body_writer(&mut self, resp_header: &ResponseHeader) {
         // the response 204, 304, HEAD does not have body
         if matches!(
-            header.metadata.status,
+            resp_header.metadata.status,
             StatusCode::NO_CONTENT | StatusCode::NOT_MODIFIED
         ) || self.get_method() == &Method::HEAD
         {
@@ -467,20 +404,20 @@ impl Downstream {
         }
 
         // 1xx response, ignore body write
-        if header.metadata.status.is_informational()
-            && header.metadata.status != StatusCode::SWITCHING_PROTOCOLS
+        if resp_header.metadata.status.is_informational()
+            && resp_header.metadata.status != StatusCode::SWITCHING_PROTOCOLS
         {
             return;
         }
 
         // check if session is upgrade
-        if self.is_session_upgrade(header) {
+        if self.is_session_upgrade(resp_header) {
             self.body_writer.with_until_closed_write();
             return;
         }
 
         // check if response is transfer encoding
-        let transfer_encoding_value = header.get_header(http::header::TRANSFER_ENCODING);
+        let transfer_encoding_value = resp_header.get_header(http::header::TRANSFER_ENCODING);
         let transfer_encoding = Utils::is_header_value_chunk_encoding(transfer_encoding_value);
 
         // if transfer encoding, set writer to chunk encoding
@@ -490,12 +427,84 @@ impl Downstream {
         }
 
         // check if response has content length
-        let content_length_value = header.get_header(http::header::CONTENT_LENGTH);
+        let content_length_value = resp_header.get_header(http::header::CONTENT_LENGTH);
         let content_length = Utils::get_content_length_value(content_length_value);
 
         match content_length {
             Some(length) => self.body_writer.with_content_length_write(length),
             None => self.body_writer.with_until_closed_write(),
+        }
+    }
+
+    /// send a response headers to downstream
+    /// this can be called multiple times e.g during error and writing resposne from upstream
+    pub async fn write_response_headers(
+        &mut self,
+        mut resp_header: ResponseHeader,
+    ) -> tokio::io::Result<()> {
+        // check if response headers should be ignored
+        if resp_header.metadata.status.is_informational()
+            && self.is_ignoring_response_headers(resp_header.get_status_code().as_u16())
+        {
+            return Ok(());
+        }
+
+        // check if response headers already sent, cannot send again
+        if let Some(response_headers) = self.response_header.as_ref() {
+            if !response_headers.metadata.status.is_informational() || self.upgrade {
+                return Ok(());
+            }
+        }
+
+        // check if response headers should be updated
+        if !resp_header.metadata.status.is_informational() && self.update_response_headers {
+            let timestamp = std::time::SystemTime::now();
+            let http_date = httpdate::fmt_http_date(timestamp);
+            resp_header.insert_header(http::header::DATE, http_date);
+
+            let connection_value = if self.is_session_keepalive() {
+                "keep-alive"
+            } else {
+                "close"
+            };
+            resp_header.insert_header(http::header::CONNECTION, connection_value);
+        }
+
+        if resp_header.metadata.status == 101 {
+            // close connection when upgrade happens
+            self.set_keepalive(None);
+        }
+
+        if resp_header.metadata.status == 101 || !resp_header.metadata.status.is_informational() {
+            if self.is_session_upgrade(&resp_header) {
+                self.upgrade = true;
+            } else {
+                self.body_reader.with_content_length_read(0, b"");
+            }
+            self.set_response_body_writer(&resp_header);
+        };
+
+        // check if we should flush
+        let flush = resp_header.metadata.status.is_informational()
+            || resp_header
+                .get_header(http::header::CONTENT_LENGTH)
+                .is_none();
+
+        let mut resp_buf = resp_header.build_to_buffer();
+        // TODO: add write timeouts here
+        match self.stream.write_all(&mut resp_buf).await {
+            Ok(()) => {
+                if flush || self.body_writer.finished() {
+                    self.stream.flush().await?;
+                }
+                self.response_header = Some(resp_header);
+                self.buf_write_size += resp_buf.len();
+                Ok(())
+            }
+            Err(e) => {
+                let error = format!("error writing response header: {:>}", e);
+                Err(tokio::io::Error::new(tokio::io::ErrorKind::Other, error))
+            }
         }
     }
 
@@ -505,7 +514,7 @@ impl Downstream {
         let size_written = self.body_writer.write_body(&mut self.stream, buffer).await;
 
         if let Ok(Some(sent)) = size_written {
-            self.buffer_size_sent += sent;
+            self.buf_write_size += sent;
         }
 
         size_written
@@ -527,7 +536,7 @@ impl Downstream {
     /// check if the request is an request upgrade
     pub fn is_request_upgrade(&self) -> bool {
         let req_header = self
-            .request_headers
+            .request_header
             .as_ref()
             .expect("Request is not read yet");
         Utils::is_request_upgrade(req_header)
@@ -544,17 +553,17 @@ impl Downstream {
     /// check if request is expect continue
     pub fn is_request_expect_continue(&self) -> bool {
         let req_header = self
-            .request_headers
+            .request_header
             .as_ref()
             .expect("Request is not read yet");
         Utils::is_request_expect_continue(req_header)
     }
 
     /// check if we should ignore response headers
-    pub fn is_ignoring_response_headers(&self, status: u16) -> bool {
+    pub fn is_ignoring_response_headers(&self, status_code: u16) -> bool {
         self.ignore_response_headers
-            && status != 100
-            && !(status == 100 && self.is_request_expect_continue())
+            && status_code != 100
+            && !(status_code == 100 && self.is_request_expect_continue())
     }
 
     /// set downstream keepalive timeout
@@ -610,5 +619,10 @@ impl Downstream {
         } else {
             self.set_keepalive(None); // off by default for http 1.0
         }
+    }
+
+    /// consume stream to be returned to connection pool
+    pub fn return_stream(self) -> Stream {
+        self.stream
     }
 }
