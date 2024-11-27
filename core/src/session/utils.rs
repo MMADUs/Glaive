@@ -1,42 +1,4 @@
-use std::time::Duration;
-
-use super::{request::RequestHeader, response::ResponseHeader};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum KeepaliveStatus {
-    Timeout(Duration),
-    Infinite,
-    Off,
-}
-
-struct ConnectionValue {
-    keep_alive: bool,
-    upgrade: bool,
-    close: bool,
-}
-
-impl ConnectionValue {
-    fn new() -> Self {
-        ConnectionValue {
-            keep_alive: false,
-            upgrade: false,
-            close: false,
-        }
-    }
-
-    fn close(mut self) -> Self {
-        self.close = true;
-        self
-    }
-    fn upgrade(mut self) -> Self {
-        self.upgrade = true;
-        self
-    }
-    fn keep_alive(mut self) -> Self {
-        self.keep_alive = true;
-        self
-    }
-}
+use super::{request::RequestHeader, response::ResponseHeader, keepalive::ConnectionValue};
 
 pub struct Utils;
 

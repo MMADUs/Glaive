@@ -9,11 +9,13 @@ use crate::stream::stream::Stream;
 
 use super::{
     case::IntoCaseHeaderName,
+    keepalive::KeepaliveStatus,
     offset::{KVOffset, Offset},
     reader::BodyReader,
     request::RequestHeader,
     response::ResponseHeader,
-    utils::{KeepaliveStatus, Utils},
+    task::Task,
+    utils::Utils,
     writer::BodyWriter,
 };
 
@@ -21,6 +23,8 @@ const INIT_BUFFER_SIZE: usize = 1024;
 const MAX_BUFFER_SIZE: usize = 8192;
 const MAX_HEADERS_COUNT: usize = 256;
 
+/// http 1.x upstream session
+/// having a full control of the upstream here.
 pub struct Upstream {
     // downstream (client) socket stream
     pub stream: Stream,
@@ -100,7 +104,11 @@ impl Upstream {
             let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS_COUNT];
             let mut response = Response::new(&mut headers);
 
-            match response.parse(&read_buffer) {
+            let mut response_parser = httparse::ParserConfig::default();
+            response_parser.allow_spaces_after_header_name_in_responses(true);
+            response_parser.allow_obsolete_multiline_headers_in_responses(true);
+
+            match response_parser.parse_response(&mut response, &read_buffer) {
                 Ok(Status::Complete(size)) => {
                     let headers_offset = Offset::new(0, size);
                     let body_offset = Offset::new(size, read_buf_size);
@@ -362,13 +370,13 @@ impl Upstream {
     }
 
     /// check if the reading process of the response body is finished
-    pub async fn is_reading_response_body_finished(&mut self) -> bool {
+    pub fn is_reading_response_body_finished(&mut self) -> bool {
         self.set_response_body_reader();
         self.body_reader.is_finished()
     }
 
     /// check if the response body is empty
-    pub async fn is_response_body_empty(&mut self) -> bool {
+    pub fn is_response_body_empty(&mut self) -> bool {
         self.set_response_body_reader();
         self.body_reader.is_body_empty()
     }
@@ -378,6 +386,35 @@ impl Upstream {
         if self.upgrade && !self.body_reader.is_finished() {
             // reset to close
             self.body_reader.with_content_length_read(0, b"");
+        }
+    }
+
+    /// check if we should read response header
+    pub fn should_read_response_header(&self) -> bool {
+        let status_code = self.get_status_code();
+        match status_code.as_u16() {
+            101 => false,
+            100..=199 => true,
+            _ => false,
+        }
+    }
+
+    /// function associated to read upstream buffer
+    pub async fn read_upstream_response(&mut self) -> tokio::io::Result<Task> {
+        if self.response_header.is_none() && self.should_read_response_header() {
+            self.read_response().await?;
+            let resp_header = self.response_header.clone().unwrap();
+            let end_of_body = self.is_reading_response_body_finished();
+            // send header task
+            Ok(Task::Header(resp_header, end_of_body))
+        } else if self.is_reading_response_body_finished() {
+            // send task is done
+            Ok(Task::Done)
+        } else {
+            let body = self.read_response_body_bytes().await?;
+            let end_of_body = self.is_reading_response_body_finished();
+            // send body task
+            Ok(Task::Body(body, end_of_body))
         }
     }
 }
@@ -419,6 +456,7 @@ impl Upstream {
     ) -> tokio::io::Result<()> {
         self.set_request_body_writer(&req_header);
         let mut req_buf = req_header.build_to_buffer();
+        // TODO: add write timeout here
         match self.stream.write_all(&mut req_buf).await {
             Ok(()) => {
                 self.stream.flush().await?;
@@ -452,6 +490,10 @@ impl Upstream {
         self.stream.flush().await?;
         self.force_close_response_body_reader();
         Ok(res)
+    }
+
+    pub async fn write_upstream_request(&mut self) -> tokio::io::Result<()> {
+
     }
 }
 

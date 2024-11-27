@@ -17,7 +17,7 @@ const EMPTY_SPACE: &[u8; 1] = b" ";
 pub type CaseMap = HeaderMap<CaseHeaderName>;
 
 /// a type for response headers
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResponseHeader {
     pub metadata: Parts,
     pub header_case: CaseMap,

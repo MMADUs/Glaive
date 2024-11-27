@@ -1,19 +1,21 @@
 use std::time::Duration;
 
 use crate::stream::stream::Stream;
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use http::header::AsHeaderName;
 use http::{HeaderValue, Method, StatusCode, Uri, Version};
 use httparse::{Request, Status};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use super::task::Task;
 use super::{
     case::IntoCaseHeaderName,
+    keepalive::KeepaliveStatus,
     offset::{KVOffset, Offset},
     reader::BodyReader,
     request::RequestHeader,
     response::ResponseHeader,
-    utils::{KeepaliveStatus, Utils},
+    utils::Utils,
     writer::BodyWriter,
 };
 
@@ -28,6 +30,8 @@ pub struct Downstream {
     pub stream: Stream,
     // raw buffer for stream parse
     pub buffer: Bytes,
+    // buffer used for vectored write body
+    pub write_body_vec_buffer: BytesMut,
     // raw buffer request headers & body offset
     pub buf_headers_offset: Option<Offset>,
     pub buf_body_offset: Option<Offset>,
@@ -59,6 +63,7 @@ impl Downstream {
         Downstream {
             stream: s,
             buffer: Bytes::new(),
+            write_body_vec_buffer: BytesMut::new(),
             buf_headers_offset: None,
             buf_body_offset: None,
             request_header: None,
@@ -367,13 +372,13 @@ impl Downstream {
     }
 
     /// check if the reading process of the request body is finished
-    pub async fn is_reading_request_body_finished(&mut self) -> bool {
+    pub fn is_reading_request_body_finished(&mut self) -> bool {
         self.set_request_body_reader();
         self.body_reader.is_finished()
     }
 
     /// check if the request body is empty
-    pub async fn is_request_body_empty(&mut self) -> bool {
+    pub fn is_request_body_empty(&mut self) -> bool {
         self.set_request_body_reader();
         self.body_reader.is_body_empty()
     }
@@ -383,6 +388,35 @@ impl Downstream {
         if self.upgrade && !self.body_reader.is_finished() {
             // reset to close
             self.body_reader.with_content_length_read(0, b"");
+        }
+    }
+
+    /// read process for idle
+    pub async fn idle_read(&mut self) -> tokio::io::Result<usize> {
+        let mut buf: [u8; 1] = [0; 1];
+        self.stream.read(&mut buf).await
+    }
+
+    /// the function assosiated to read the downstream buffer
+    pub async fn read_downstream_request(
+        &mut self,
+        no_body_expected: bool,
+    ) -> tokio::io::Result<Option<Bytes>> {
+        if no_body_expected || self.is_reading_request_body_finished() {
+            let read = self.idle_read().await?;
+            if read == 0 {
+                return Err(tokio::io::Error::new(
+                    tokio::io::ErrorKind::Other,
+                    "connection closed",
+                ));
+            } else {
+                return Err(tokio::io::Error::new(
+                    tokio::io::ErrorKind::Other,
+                    "connect error",
+                ));
+            }
+        } else {
+            self.read_request_body_bytes().await
         }
     }
 }
@@ -513,9 +547,30 @@ impl Downstream {
         // TODO: add write timeouts here
         let size_written = self.body_writer.write_body(&mut self.stream, buffer).await;
 
-        if let Ok(Some(sent)) = size_written {
-            self.buf_write_size += sent;
+        if let Ok(Some(written)) = size_written {
+            self.buf_write_size += written;
         }
+
+        size_written
+    }
+
+    /// write response body with the write body vec buffer
+    pub async fn vectored_write_response_body(&mut self) -> tokio::io::Result<Option<usize>> {
+        if self.write_body_vec_buffer.is_empty() {
+            return Ok(None);
+        }
+
+        // TODO: add timeouts here
+        let size_written = self
+            .body_writer
+            .write_body(&mut self.stream, &self.write_body_vec_buffer)
+            .await;
+
+        if let Ok(Some(written)) = size_written {
+            self.buf_write_size += written;
+        }
+
+        self.write_body_vec_buffer.clear();
 
         size_written
     }
@@ -527,6 +582,86 @@ impl Downstream {
         self.stream.flush().await?;
         self.force_close_request_body_reader();
         Ok(res)
+    }
+
+    /// task handler for write response to downstream
+    pub async fn response_to_downstream(&mut self, task: Task) -> tokio::io::Result<bool> {
+        let end_stream = match task {
+            Task::Header(resp_header, end_stream) => {
+                self.write_response_headers(resp_header).await?;
+                end_stream
+            }
+            Task::Body(resp_body, end_stream) => match resp_body {
+                Some(body) => {
+                    if !body.is_empty() {
+                        self.write_response_body(&body).await?;
+                    }
+                    end_stream
+                }
+                None => end_stream,
+            },
+            Task::Trailer(_) => true,
+            Task::Done => true,
+            Task::Failed(e) => return Err(e),
+        };
+        // check if end of stream
+        if end_stream {
+            self.finish_writing_response_body().await?;
+        }
+        Ok(end_stream)
+    }
+
+    /// task handler for vectored write response to downstream
+    pub async fn vectored_response_to_downstream(
+        &mut self,
+        tasks: Vec<Task>,
+    ) -> tokio::io::Result<bool> {
+        let mut end_stream = false;
+        // proceed all tasks
+        for task in tasks.into_iter() {
+            end_stream = match task {
+                Task::Header(resp_header, end_stream) => {
+                    self.write_response_headers(resp_header).await?;
+                    end_stream
+                }
+                Task::Body(resp_body, end_stream) => match resp_body {
+                    Some(body) => {
+                        // append bytes before write
+                        if !body.is_empty() {
+                            self.write_body_vec_buffer.put_slice(&body);
+                        }
+                        end_stream
+                    }
+                    None => end_stream,
+                },
+                Task::Trailer(_) => true,
+                Task::Done => true,
+                Task::Failed(e) => {
+                    self.vectored_write_response_body().await?;
+                    self.stream.flush().await?;
+                    return Err(e);
+                }
+            }
+        }
+        // write from tasks
+        self.vectored_write_response_body().await?;
+        // check if end of the stream
+        if end_stream {
+            self.finish_writing_response_body().await?;
+        }
+        Ok(end_stream)
+    }
+
+    /// the associated function for writing response to downstream
+    pub async fn write_downstream_response(
+        &mut self,
+        mut tasks: Vec<Task>,
+    ) -> tokio::io::Result<bool> {
+        match tasks.len() {
+            0 => Ok(true), // quick return if no task
+            1 => self.response_to_downstream(tasks.pop().unwrap()).await,
+            _ => self.vectored_response_to_downstream(tasks).await,
+        }
     }
 }
 

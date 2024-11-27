@@ -5,7 +5,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
 use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
 use crate::pool::stream::StreamManager;
-use crate::service::buffer::BufferSession;
 use crate::service::peer::{PeerNetwork, UpstreamPeer};
 use crate::stream::stream::Stream;
 
@@ -99,73 +98,6 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
     }
 
     async fn test_handle(&self, socket: Stream) -> tokio::io::Result<()> {
-        // Example Method
-        let method = Method::GET;
-        let method_str = method.as_str();
-        println!("HTTP Method: {}", method_str);
-
-        // Example Status Code
-        let status = StatusCode::OK;
-        let status_str = status.as_str();
-        println!("HTTP Status Code: {}", status_str);
-        println!("Reason: {}", status.canonical_reason().unwrap_or(""));
-
-        // Example Version
-        let version = Version::HTTP_11;
-        println!("HTTP Version: {:?}", version);
-        let mut session = BufferSession::new(socket);
-        let _ = session.read_stream().await;
-
-        session
-            .headers
-            .append_header("nizwa".as_bytes(), "ganteng".as_bytes());
-
-        session
-            .headers
-            .append_header("athayA".as_bytes(), "cantik".as_bytes());
-
-        session
-            .headers
-            .append_header("athaya".as_bytes(), "cantik".as_bytes());
-
-        let appid = session.headers.get_header("appid");
-        println!("appid header value: {}", appid.unwrap_or(""));
-        
-        println!("finished headers: {:?}", session.headers.build());
-
-        // let mut buffer = vec![0; 1024];
-        //
-        // // Read the request
-        // let n = socket.read(&mut buffer).await?;
-        // println!("Received {} bytes", n);
-        //
-        // // Print raw request for debugging
-        // println!("Raw request:\n{}", String::from_utf8_lossy(&buffer[..n]));
-        //
-        // // Create JSON response
-        // let json_response = r#"{
-        // "message": "Hello from Rust Tokio server!",
-        // "status": "success"
-        // }"#;
-        //
-        // // Create HTTP response
-        // let response = format!(
-        //     "HTTP/1.1 200 OK\r\n\
-        //  Content-Type: application/json\r\n\
-        //  Content-Length: {}\r\n\
-        //  Access-Control-Allow-Origin: *\r\n\
-        //  Connection: close\r\n\
-        //  \r\n\
-        //  {}",
-        //     json_response.len(),
-        //     json_response
-        // );
-        //
-        // // Write response back to socket
-        // socket.write_all(response.as_bytes()).await?;
-        // socket.flush().await?;
-
-        println!("Sent response successfully\n");
 
         Ok(())
     }
