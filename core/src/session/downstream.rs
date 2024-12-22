@@ -392,18 +392,17 @@ impl Downstream {
     }
 
     /// read process for idle
-    pub async fn idle_read(&mut self) -> tokio::io::Result<usize> {
+    pub async fn idle(&mut self) -> tokio::io::Result<usize> {
         let mut buf: [u8; 1] = [0; 1];
         self.stream.read(&mut buf).await
     }
 
-    /// the function assosiated to read the downstream buffer
-    pub async fn read_downstream_request(
+    /// read the request body or idle when calling it the next time
+    pub async fn read_request_body_or_idle(
         &mut self,
-        no_body_expected: bool,
     ) -> tokio::io::Result<Option<Bytes>> {
-        if no_body_expected || self.is_reading_request_body_finished() {
-            let read = self.idle_read().await?;
+        if self.is_reading_request_body_finished() {
+            let read = self.idle().await?;
             if read == 0 {
                 return Err(tokio::io::Error::new(
                     tokio::io::ErrorKind::Other,
@@ -417,6 +416,22 @@ impl Downstream {
             }
         } else {
             self.read_request_body_bytes().await
+        }
+    }
+
+    /// the function associated to read the downstream request
+    pub async fn read_downstream_request(&mut self) -> tokio::io::Result<Task> {
+        match self.read_request_body_or_idle().await {
+            Ok(req_body) => {
+                // if request upgrade, mark as done
+                if req_body.is_none() && self.is_request_upgrade() {
+                    return Ok(Task::Done)
+                }
+                // proceed request body
+                let end_stream = self.is_reading_request_body_finished();
+                Ok(Task::Body(req_body, end_stream))
+            },
+            Err(e) => Err(e),
         }
     }
 }
@@ -585,7 +600,7 @@ impl Downstream {
     }
 
     /// task handler for write response to downstream
-    pub async fn response_to_downstream(&mut self, task: Task) -> tokio::io::Result<bool> {
+    pub async fn write_response_to_downstream(&mut self, task: Task) -> tokio::io::Result<bool> {
         let end_stream = match task {
             Task::Header(resp_header, end_stream) => {
                 self.write_response_headers(resp_header).await?;
@@ -612,7 +627,7 @@ impl Downstream {
     }
 
     /// task handler for vectored write response to downstream
-    pub async fn vectored_response_to_downstream(
+    pub async fn vectored_write_response_to_downstream(
         &mut self,
         tasks: Vec<Task>,
     ) -> tokio::io::Result<bool> {
@@ -659,8 +674,8 @@ impl Downstream {
     ) -> tokio::io::Result<bool> {
         match tasks.len() {
             0 => Ok(true), // quick return if no task
-            1 => self.response_to_downstream(tasks.pop().unwrap()).await,
-            _ => self.vectored_response_to_downstream(tasks).await,
+            1 => self.write_response_to_downstream(tasks.pop().unwrap()).await,
+            _ => self.vectored_write_response_to_downstream(tasks).await,
         }
     }
 }

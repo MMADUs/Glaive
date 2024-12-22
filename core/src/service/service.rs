@@ -1,14 +1,10 @@
 use futures::future;
-use http::method;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
 use crate::listener::listener::{ListenerAddress, NetworkStack, Socket};
 use crate::pool::stream::StreamManager;
 use crate::service::peer::{PeerNetwork, UpstreamPeer};
 use crate::stream::stream::Stream;
-
-use http::{Method, StatusCode, Version};
 
 // TESTING traits for customization soon
 pub trait ServiceType: Send + Sync + 'static {
@@ -98,7 +94,6 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
     }
 
     async fn test_handle(&self, socket: Stream) -> tokio::io::Result<()> {
-
         Ok(())
     }
 

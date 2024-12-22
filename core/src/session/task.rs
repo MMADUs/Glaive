@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use super::response::ResponseHeader;
 
 #[derive(Debug)]

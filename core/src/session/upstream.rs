@@ -423,7 +423,7 @@ impl Upstream {
 /// with write helper function
 impl Upstream {
     /// set request body writer mode
-    pub async fn set_request_body_writer(&mut self, req_header: &RequestHeader) {
+    pub fn set_request_body_writer(&mut self, req_header: &RequestHeader) {
         // check if request is an upgrade
         if Utils::is_request_upgrade(req_header) {
             self.body_writer.with_until_closed_write();
@@ -492,8 +492,23 @@ impl Upstream {
         Ok(res)
     }
 
-    pub async fn write_upstream_request(&mut self) -> tokio::io::Result<()> {
-
+    /// the associated function for writing request to upstream
+    pub async fn write_upstream_request(&mut self, task: Task) -> tokio::io::Result<bool> {
+        let end_stream = match task {
+            Task::Body(req_body, end_stream) => {
+                if let Some(body) = req_body {
+                    self.write_request_body(&body).await?;
+                }
+                end_stream
+            }
+            // should never happend, sender only send body
+            _ => panic!("unexpected request to write"),
+        };
+        // check if end of stream
+        if end_stream {
+            self.finish_writing_request_body().await?;
+        }
+        Ok(end_stream)
     }
 }
 
@@ -547,9 +562,28 @@ impl Upstream {
     }
 
     /// get keepalive value from socket stream
-    /// TODO: get actual values
     pub fn get_keepalive_value(&self) -> (Option<u64>, Option<usize>) {
-        (None, None)
+        let Some(keepalive_header) = self.get_header("Keep-Alive") else {
+            return (None, None);
+        };
+
+        let Ok(header_value) = std::str::from_utf8(keepalive_header.as_bytes()) else {
+            return (None, None);
+        };
+
+        let mut timeout = None;
+        let mut max = None;
+
+        for param in header_value.split(",") {
+            let parts = param.split_once("=").map(|(k, v)| (k.trim(), v));
+            match parts {
+                Some(("timeout", timeout_value)) => timeout = timeout_value.trim().parse().ok(),
+                Some(("max", max_value)) => max = max_value.trim().parse().ok(),
+                _ => {}
+            }
+        }
+
+        (timeout, max)
     }
 
     /// apply session keepalive timeout
