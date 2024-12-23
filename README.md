@@ -1,34 +1,19 @@
-![Glaive Diagram Image](./asset/glaive_logo.png)
+# hyflux
 
-# About Glaive
+![hyflux-logo](./asset/hyflux-logo.png)
 
-Glaive in an API Gateway written in Rust, this is a gateway service that will fulfill your needs, it provides a simple configuration and some built in plugins to work with.
-We aim the system to work perfectly and providing robust performance, resource usage, and security within a very simple configuration.
+## What is hyflux
+
+Hyflux is a high-performance, fully asynchronous, and scalable network framework designed to build virtually anything network-related. From real-time communication systems and distributed systems to custom proxies and load balancers, Hyflux is the ultimate toolkit for modern, efficient, and reliable networking solutions.
+
+## Reason to use hyflux
+
+Hyflux is built on top of the Rust Programming Language leveraging the tokio runtime, it is fast and efficient, not only it works great for a performance sensitive network systems, but the hyflux APIs extensive are highly programmable for customizations.
 
 > [!WARNING]
-> This project is a work-in-progress.
+> Hyflux is currently still under development phase.
 
-# Architecture Overview
-
-Glaive capable of handling a bunch of systems in the backdoor from the outer world, it is capable of handling a static web, services, LLMs & more.
-
-![Glaive Diagram Image](./asset/glaive_diagram.png)
-
-# Feature Highlights
-
-* Support TLS over OpenSSL
-* Support various of request: REST, gRPC, WebSocket, etc.
-* Provide a simple & robust configurations.
-* Built in with various plugins: Cache, Observability, Kubernetes, etc.
-
-# System & Build Requirement
+## System & Build Requirement
 
 * Current Rust version: rustc 1.75.0
 * Currently, it's only for Linux / Docker as alternative
-* Make sure that [Perl 5] is installed on your system for OpenSSL
-
-[Perl 5]:https://www.perl.org/
-
-# Getting Started
-
-> coming soon
