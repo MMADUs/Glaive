@@ -1,5 +1,6 @@
 use tokio::io::{AsyncRead, AsyncWrite};
 use std::any::Any;
+use std::fmt::Debug;
 
 use crate::stream::traits::UniqueID;
 
@@ -11,6 +12,7 @@ pub trait StreamRules
     + Unpin
     + Send
     + Sync
+    + Debug
 {
     // helper to cast as the reference of the concrete type
     fn as_any(&self) -> &dyn Any;
@@ -25,7 +27,8 @@ impl<T
     + UniqueID
     + Unpin
     + Send
-    + Sync,
+    + Sync
+    + Debug,
 > StreamRules for T
 where
     T: 'static,

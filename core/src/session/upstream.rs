@@ -110,8 +110,8 @@ impl Upstream {
 
             match response_parser.parse_response(&mut response, &read_buffer) {
                 Ok(Status::Complete(size)) => {
-                    let headers_offset = Offset::new(0, size);
-                    let body_offset = Offset::new(size, read_buf_size);
+                    let headers_offset = Offset(0, size);
+                    let body_offset = Offset(size, read_buf_size);
 
                     self.buf_headers_offset = Some(headers_offset);
                     self.buf_body_offset = Some(body_offset);
@@ -159,8 +159,8 @@ impl Upstream {
                     }
 
                     self.buffer = buffer_bytes;
+                    self.upgrade = self.is_session_upgrade(&response_header);
                     self.response_header = Some(response_header);
-                    self.response_header = None;
 
                     return Ok(());
                 }
@@ -391,6 +391,11 @@ impl Upstream {
 
     /// check if we should read response header
     pub fn should_read_response_header(&self) -> bool {
+        // check for response header first, or else status code cannot be found
+        if self.response_header.is_none() {
+            return true;
+        }
+        // when response header exist, get the status
         let status_code = self.get_status_code();
         match status_code.as_u16() {
             101 => false,
@@ -401,8 +406,9 @@ impl Upstream {
 
     /// function associated to read upstream buffer
     pub async fn read_upstream_response(&mut self) -> tokio::io::Result<Task> {
-        if self.response_header.is_none() && self.should_read_response_header() {
+        if self.should_read_response_header() {
             self.read_response().await?;
+            // safe to unwrap, because read response is executed
             let resp_header = self.response_header.clone().unwrap();
             let end_of_body = self.is_reading_response_body_finished();
             // send header task
@@ -502,7 +508,7 @@ impl Upstream {
                 end_stream
             }
             // should never happend, sender only send body
-            _ => panic!("unexpected request to write"),
+            _ => panic!("unexpected request to write: {:?}", task),
         };
         // check if end of stream
         if end_stream {

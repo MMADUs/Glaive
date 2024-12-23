@@ -1,3 +1,4 @@
+use dotenv::dotenv;
 use std::sync::Arc;
 use tokio::runtime::{Builder, Handle};
 use tokio::signal::unix;
@@ -57,6 +58,19 @@ impl<A: ServiceType + Send + Sync + 'static> Server<A> {
     // this is the method that is used to run the server
     // forever
     pub fn run_forever(&mut self) {
+        println!("running server...");
+        // load env
+        dotenv().ok();
+        // setup tracing
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
+            .with_target(true)
+            .pretty()
+            .init();
+        // running runtimes
         let mut runtimes: Vec<Runtime> = Vec::new();
         while let Some(service) = self.services.pop() {
             // example threads, make it dynamic later

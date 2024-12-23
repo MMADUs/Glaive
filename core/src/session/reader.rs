@@ -82,6 +82,7 @@ impl ReadState {
 const BODY_BUFFER_SIZE: usize = 1024 * 64;
 const PARTIAL_CHUNK_HEAD_LIMIT: usize = 1024 * 8;
 
+#[derive(Debug)]
 pub struct BodyReader {
     pub read_state: ReadState,
     pub body_buffer: Option<BytesMut>,

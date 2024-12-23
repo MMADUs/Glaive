@@ -3,6 +3,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::stream::write_vec::AsyncWriteVec;
 
+#[derive(Debug)]
 pub enum WriteState {
     // write state
     //
@@ -27,6 +28,7 @@ pub enum WriteState {
 
 const LAST_CHUNK: &[u8; 5] = b"0\r\n\r\n";
 
+#[derive(Debug)]
 pub struct BodyWriter {
     write_state: WriteState,
 }

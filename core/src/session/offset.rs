@@ -8,6 +8,7 @@ pub struct Offset(pub usize, pub usize);
 impl Offset {
     // new buffer Offset
     pub fn new(start: usize, len: usize) -> Self {
+        println!("new offset ops > start: {}, end: {}, buf len: {}", start, start + len, len);
         Offset(start, start + len)
     }
 

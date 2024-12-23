@@ -18,3 +18,7 @@ bytes = "1.8.0"
 http = "1.1.0"
 httparse = "1.9.5"
 httpdate = "1.0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-futures = "0.2"
+dotenv = "0.15"

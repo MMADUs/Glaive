@@ -4,7 +4,7 @@ use crate::stream::stream::Stream;
 use bytes::{BufMut, Bytes, BytesMut};
 use http::header::AsHeaderName;
 use http::{HeaderValue, Method, StatusCode, Uri, Version};
-use httparse::{Request, Status};
+use httparse::Status;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::task::Task;
@@ -25,6 +25,7 @@ const MAX_HEADERS_COUNT: usize = 256;
 
 /// http 1.x downstream session
 /// having a full control of the downstream here.
+#[derive(Debug)]
 pub struct Downstream {
     // downstream (client) socket stream
     pub stream: Stream,
@@ -108,15 +109,16 @@ impl Downstream {
                 Err(e) => return Err(e),
             };
 
+            println!("read_buf len: {}", len);
             read_buf_size += len;
 
             let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS_COUNT];
-            let mut request = Request::new(&mut headers);
+            let mut request = httparse::Request::new(&mut headers);
 
             match request.parse(&read_buffer) {
                 Ok(Status::Complete(size)) => {
-                    let headers_offset = Offset::new(0, size);
-                    let body_offset = Offset::new(size, read_buf_size);
+                    let headers_offset = Offset(0, size);
+                    let body_offset = Offset(size, read_buf_size);
 
                     self.buf_headers_offset = Some(headers_offset);
                     self.buf_body_offset = Some(body_offset);
@@ -441,7 +443,7 @@ impl Downstream {
 impl Downstream {
     /// after receiving response header from upstream
     /// set the response body write mode
-    pub async fn set_response_body_writer(&mut self, resp_header: &ResponseHeader) {
+    pub fn set_response_body_writer(&mut self, resp_header: &ResponseHeader) {
         // the response 204, 304, HEAD does not have body
         if matches!(
             resp_header.metadata.status,
@@ -641,7 +643,7 @@ impl Downstream {
                 }
                 Task::Body(resp_body, end_stream) => match resp_body {
                     Some(body) => {
-                        // append bytes before write
+                        // append all body bytes before write
                         if !body.is_empty() {
                             self.write_body_vec_buffer.put_slice(&body);
                         }
@@ -658,7 +660,7 @@ impl Downstream {
                 }
             }
         }
-        // write from tasks
+        // write the appended body bytes at once
         self.vectored_write_response_body().await?;
         // check if end of the stream
         if end_stream {
@@ -674,7 +676,10 @@ impl Downstream {
     ) -> tokio::io::Result<bool> {
         match tasks.len() {
             0 => Ok(true), // quick return if no task
-            1 => self.write_response_to_downstream(tasks.pop().unwrap()).await,
+            1 => {
+                self.write_response_to_downstream(tasks.pop().unwrap())
+                    .await
+            }
             _ => self.vectored_write_response_to_downstream(tasks).await,
         }
     }

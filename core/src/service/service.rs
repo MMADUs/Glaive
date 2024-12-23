@@ -77,13 +77,12 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 // shutdown signal here to break loop
             };
             match new_io {
-                Ok((mut downstream, socket_address)) => {
+                Ok((downstream, socket_address)) => {
                     // get self reference
                     let service = Arc::clone(self);
                     tokio::spawn(async move {
                         // handle here
-                        // service.handle_connection(downstream, socket_address).await
-                        service.test_handle(downstream).await
+                        service.handle_connection(downstream, socket_address).await
                     });
                 }
                 Err(e) => {
@@ -91,10 +90,6 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
                 }
             };
         }
-    }
-
-    async fn test_handle(&self, socket: Stream) -> tokio::io::Result<()> {
-        Ok(())
     }
 
     // handling incoming request to here
@@ -106,54 +101,30 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
             "node 1",
             &self.name,
             PeerNetwork::Tcp("127.0.0.1:8000".to_string()),
-            Some(10),
+            None,
         );
 
         // get upstream connection
-        match self.stream_session.get_connection_from_pool(&peer).await {
+        let upstream = match self.stream_session.get_connection_from_pool(&peer).await {
             Ok((upstream, is_reused)) => {
                 if is_reused {
                     println!("reusing stream from pool");
                 } else {
                     println!("connection does not exist in pool, new stream created");
                 }
+                upstream
+            },
+            Err(_) => panic!("error getting stream from pool"),
+        };
 
-                // let mut client_session = SessionBuffer::new(downstream);
-                // let mut server_session = SessionBuffer::new(upstream);
-                //
-                // match self
-                //     .copy_bidirectional(&mut client_session, &mut server_session)
-                //     .await
-                // {
-                //     Ok(_) => println!("copy bidirectional succeed"),
-                //     Err(_) => println!("copy bidirectional failed"),
-                // }
-            }
-            Err(_) => println!("error getting stream from pool"),
-        }
+        // handle io copy & returned the upstream
+        let upstream = match self.handle_process(downstream, upstream).await {
+            Ok(stream) => stream,
+            Err(_) => panic!("error during io copy"),
+        };
 
-        // // stream validation
-        // let stream = match upstream {
-        //     Ok((stream, is_reused)) => {
-        //         if is_reused {
-        //             println!("reusing stream from pool");
-        //         } else {
-        //             println!("connection does not exist in pool, new stream created");
-        //         }
-        //         Some(stream)
-        //     }
-        //     Err(_) => {
-        //         println!("error getting stream from pool");
-        //         None
-        //     }
-        // };
-        //
-        // if let Some(upstream) = stream {
-        //     self.handle_request(downstream, upstream).await;
-        //
-        //     // self.stream_session
-        //     //     .return_connection_to_pool(upstream, &peer)
-        //     //     .await;
-        // };
+        // return upstream to pool
+        self.stream_session.return_connection_to_pool(upstream, &peer).await;
+        println!("upstream connection returned");
     }
 }
