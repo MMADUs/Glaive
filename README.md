@@ -1,5 +1,3 @@
-# hyflux
-
 ![hyflux-logo](./asset/hyflux-logo.png)
 
 ## What is hyflux

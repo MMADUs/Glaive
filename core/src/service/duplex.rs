@@ -23,9 +23,13 @@ impl<A: ServiceType> Service<A> {
         // create new stream session for both
         let mut downstream = Downstream::new(client);
         let mut upstream = Upstream::new(server);
-
         // read request from client
-        if let Err(e) = downstream.read_request().await {
+        let res = tokio::select! {
+            biased;
+            res = downstream.read_request() => { res }
+            // we can add shutdown handler here
+        };
+        if let Err(e) = res {
             return Err(e);
         }
         // NOTE: we can use this mutable req header for modifications
@@ -40,14 +44,18 @@ impl<A: ServiceType> Service<A> {
         if let Err(e) = upstream.write_request_header(req_header).await {
             return Err(e);
         }
-
+        // enable retry buffer
+        downstream.enable_retry_buffer();
         // perform io copy
+        let start = tokio::time::Instant::now();
         if let Err(e) = self
             .copy_bidirectional(&mut downstream, &mut upstream)
             .await
         {
             return Err(e);
         }
+        let elapsed = start.elapsed();
+        tracing::info!("io copy operations completed in {:?}", elapsed);
         // return stream to pool
         let stream = upstream.return_stream();
         Ok(stream)
@@ -62,14 +70,11 @@ impl<A: ServiceType> Service<A> {
         // split stream buffer into 2 task
         let (upstream_sender, upstream_reader) = mpsc::channel(BUFFER_SIZE);
         let (downstream_sender, downstream_reader) = mpsc::channel(BUFFER_SIZE);
-
-        info!("performing io copy");
         // handle both concurrently
         let result = tokio::try_join!(
             Self::handle_downstream(downstream, upstream_sender, downstream_reader),
             Self::handle_upstream(upstream, downstream_sender, upstream_reader),
         );
-
         match result {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
@@ -85,34 +90,44 @@ impl<A: ServiceType> Service<A> {
         // process flag
         let mut request_done = false;
         let mut response_done = false;
+        // check retry buffer first
+        if let Some(buffer) = downstream.get_retry_buffer() {
+            // reserve channel
+            let sender_permit = upstream_sender
+                .reserve()
+                .await
+                .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))?;
+            // send buffer
+            sender_permit.send(Task::Body(Some(buffer), request_done));
+        }
         // duplex mode
         while !request_done || !response_done {
-            // reserve channels to prevent failures during duplex
-            let sender_permit = match upstream_sender.try_reserve() {
-                Ok(permit) => permit,
-                Err(e) => return Err(tokio::io::Error::new(tokio::io::ErrorKind::Other, e)),
-            };
-
+            // log timer
+            let timer = tokio::time::Instant::now();
+            // reserve channel
+            let sender_permit = upstream_sender
+                .try_reserve()
+                .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e));
+            // event selection
             tokio::select! {
                 // the first process that executes concurrently
                 // read the request from downstream and send the request task to upstream
-                request_task = downstream.read_downstream_request(), if !request_done => {
-                    info!("read downstream request");
+                request_task = downstream.read_downstream_request(), if !request_done && sender_permit.is_ok() => {
+                    let elapsed = timer.elapsed();
+                    info!("read downstream request took: {:?}", elapsed);
                     match request_task {
                         Ok(task) => {
                             match task {
                                 Task::Body(req_body, end_stream) => {
                                     // send task to upstream
-                                    debug!("req body: {:?}", req_body);
-                                    sender_permit.send(Task::Body(req_body, end_stream));
+                                    // safe to unwrap because we check is_ok()
+                                    sender_permit.unwrap().send(Task::Body(req_body, end_stream));
                                     // request finished determined by end of stream
-                                    debug!("req body end: {:?}", end_stream);
-                                    request_done = end_stream
+                                    request_done = end_stream;
                                 },
                                 Task::Done => {
                                     // directly mark request as done
-                                    debug!("req body done");
-                                    request_done = true
+                                    response_done = true;
                                 },
                                 // downstream reader only returns body, so ignore the rest.
                                 _ => panic!("unexpected downstream read task"),
@@ -129,33 +144,31 @@ impl<A: ServiceType> Service<A> {
                 // the last process that executes concurrently
                 // received response task from upstream and write it to downstream
                 response_task = downstream_reader.recv(), if !response_done => {
-                    info!("write downstream response");
+                    let elapsed = timer.elapsed();
+                    info!("write downstream response took: {:?}", elapsed);
                     if let Some(first_task) = response_task {
                         // list of response task
                         let mut tasks = Vec::with_capacity(BUFFER_SIZE);
-                        debug!("first task: {:?}", first_task);
                         tasks.push(first_task);
                         // get as many response task as possible
                         while let Some(resp_task) = downstream_reader.recv().now_or_never() {
-                            if let Some(task) = resp_task {
-                                debug!("vec task: {:?}", task);
-                                tasks.push(task);
-                            } else {
-                                break;
+                            match resp_task {
+                                Some(task) => tasks.push(task),
+                                None => break,
                             }
                         }
                         // processed the accumulated response task at once
                         match downstream.write_downstream_response(tasks).await {
                             Ok(is_end) => {
                                 // response finished determined by end of stream
-                                debug!("is response end: {:?}", is_end);
-                                response_done = is_end
+                                response_done = is_end;
+                                // try to force request done when response is successful
+                                request_done = is_end;
                             },
                             Err(e) => return Err(e),
                         }
                     } else {
                         // if no task received, mark response as done
-                        debug!("no req read task found");
                         response_done = true
                     }
                 }
@@ -179,22 +192,25 @@ impl<A: ServiceType> Service<A> {
         let mut response_done = false;
         // duplex mode
         while !request_done || !response_done {
+            // log timer
+            let timer = tokio::time::Instant::now();
+            // event selection
             tokio::select! {
                 // the third process that executes concurrently
                 // read the response from upstream and send the response task to downstream
                 response_task = upstream.read_upstream_response(), if !response_done => {
-                    info!("read upstream response");
+                    let elapsed = timer.elapsed();
+                    info!("read upstream response took: {:?}", elapsed);
                     match response_task {
                         Ok(task) => {
                             // response finished determined by end of stream
-                            debug!("resp task end: {:?}", task.is_end());
                             response_done = task.is_end();
+                            // try to force request done when response is successful
+                            request_done = task.is_end();
                             // directly send task
-                            debug!("resp task: {:?}", task);
                             let result = downstream_sender.send(task).await;
                             // handle task sending error & somehow parse from std result to tokio result
                             if result.is_err() && !upstream.is_request_upgrade() {
-                                error!("sender error");
                                 return result.map_err(|err| tokio::io::Error::new(tokio::io::ErrorKind::Other, err));
                             }
                         }
@@ -209,21 +225,19 @@ impl<A: ServiceType> Service<A> {
                 // the second process that executes concurrently
                 // received request task from downstream and write it to upstream
                 request_task = upstream_reader.recv(), if !request_done => {
-                    info!("write upstream request");
+                    let elapsed = timer.elapsed();
+                    info!("write upstream request took: {:?}", elapsed);
                     if let Some(task) = request_task {
-                        debug!("req task: {:?}", task);
                         match upstream.write_upstream_request(task).await {
                             Ok(is_end) => {
                                 // request finished determined by end of stream
-                                debug!("req task end: {:?}", is_end);
-                                request_done = is_end
+                                request_done = is_end;
                             },
                             Err(e) => return Err(e),
                         }
                     } else {
                         // if no task revceived, mark request as done
-                        debug!("no req write task found");
-                        request_done = true
+                        request_done = true;
                     }
                 }
 

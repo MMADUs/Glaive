@@ -7,6 +7,7 @@ use http::{HeaderValue, Method, StatusCode, Uri, Version};
 use httparse::Status;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use super::buffer::StorageBuffer;
 use super::task::Task;
 use super::{
     case::IntoCaseHeaderName,
@@ -22,6 +23,7 @@ use super::{
 const INIT_BUFFER_SIZE: usize = 1024;
 const MAX_BUFFER_SIZE: usize = 8192;
 const MAX_HEADERS_COUNT: usize = 256;
+const BODY_BUF_LIMIT: usize = 1024 * 64;
 
 /// http 1.x downstream session
 /// having a full control of the downstream here.
@@ -33,6 +35,8 @@ pub struct Downstream {
     pub buffer: Bytes,
     // buffer used for vectored write body
     pub write_body_vec_buffer: BytesMut,
+    // buffer used to store a copy of original buffer
+    pub retry_buffer: Option<StorageBuffer>,
     // raw buffer request headers & body offset
     pub buf_headers_offset: Option<Offset>,
     pub buf_body_offset: Option<Offset>,
@@ -65,6 +69,7 @@ impl Downstream {
             stream: s,
             buffer: Bytes::new(),
             write_body_vec_buffer: BytesMut::new(),
+            retry_buffer: None,
             buf_headers_offset: None,
             buf_body_offset: None,
             request_header: None,
@@ -109,7 +114,6 @@ impl Downstream {
                 Err(e) => return Err(e),
             };
 
-            println!("read_buf len: {}", len);
             read_buf_size += len;
 
             let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS_COUNT];
@@ -301,10 +305,10 @@ impl Downstream {
     pub fn set_request_body_reader(&mut self) {
         // if reader is still on start we set the reader
         if self.body_reader.is_start() {
-            // // reset retry buffer
-            // if let Some(buffer) = self.retry_buffer.as_mut() {
-            //     buffer.clear();
-            // }
+             // reset retry buffer
+             if let Some(buffer) = self.retry_buffer.as_mut() {
+                 buffer.clear_buffer();
+             }
 
             let body_bytes = self.buf_body_offset.as_ref().unwrap().get(&self.buffer[..]);
 
@@ -344,6 +348,35 @@ impl Downstream {
         }
     }
 
+    /// check if the retry buffer is truncated
+    pub fn is_retry_buffer_truncated(&self) -> bool {
+        if let Some(buffer) = &self.retry_buffer {
+            buffer.is_buffer_truncated()
+        } else {
+            false
+        }
+    }
+
+    /// enable retry buffer
+    pub fn enable_retry_buffer(&mut self) {
+        if self.retry_buffer.is_none() {
+            self.retry_buffer = Some(StorageBuffer::new(BODY_BUF_LIMIT));
+        }
+    }
+
+    /// get the retry buffer bytes
+    pub fn get_retry_buffer(&self) -> Option<Bytes> {
+        if let Some(buffer) = &self.retry_buffer {
+            if self.is_retry_buffer_truncated() {
+                None
+            } else {
+                buffer.get_buffer()
+            }
+        } else {
+            None
+        }
+    }
+
     /// read the request body after setting the read mode
     /// the readed body buffer is iniside the body reader, so we received the offset
     pub async fn read_request_body(&mut self) -> tokio::io::Result<Option<Offset>> {
@@ -367,6 +400,10 @@ impl Downstream {
                 let sliced = self.read_sliced_request_body(&offset).await;
                 let bytes = Bytes::copy_from_slice(sliced);
                 self.buf_read_size += bytes.len();
+                // also store to retry buffer if enabled
+                if let Some(buffer) = self.retry_buffer.as_mut() {
+                    buffer.write_buffer(&bytes);
+                }
                 Ok(Some(bytes))
             }
             None => Ok(None),
