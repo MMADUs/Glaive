@@ -1,6 +1,8 @@
 use nix::sys::socket::{getpeername, getsockname, SockaddrStorage};
 use std::net::SocketAddr as StdSockAddr;
+use std::hash::{Hash, Hasher};
 use std::os::unix::net::SocketAddr as StdUnixSockAddr;
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub enum SocketAddress {
@@ -9,6 +11,20 @@ pub enum SocketAddress {
 }
 
 impl SocketAddress {
+    pub fn parse_tcp(raw: &str) -> Self {
+        match StdSockAddr::from_str(raw) {
+            Ok(address) => SocketAddress::Tcp(address),
+            Err(_) => panic!("invalid tcp socket address"),
+        }
+    }
+
+    pub fn parse_unix(raw: &str) -> Self {
+        match StdUnixSockAddr::from_pathname(raw) {
+            Ok(path) => SocketAddress::Unix(path),
+            Err(_) => panic!("invalid unix path"),
+        }
+    }
+
     pub fn as_tcp(&self) -> Option<&StdSockAddr> {
         if let SocketAddress::Tcp(address) = self {
             Some(address)
@@ -52,7 +68,7 @@ impl SocketAddress {
         Some(address)
     }
 
-    pub fn frow_raw_fd(fd: std::os::unix::io::RawFd, peer_address: bool) -> Option<SocketAddress> {
+    pub fn from_raw_fd(fd: std::os::unix::io::RawFd, peer_address: bool) -> Option<SocketAddress> {
         // get address from fd
         let storage = if peer_address {
             getpeername(fd)
@@ -63,6 +79,26 @@ impl SocketAddress {
         match storage {
             Ok(socket) => Self::from_storage(&socket),
             Err(_) => None,
+        }
+    }
+}
+
+impl Hash for SocketAddress {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Tcp(sockaddr) => sockaddr.hash(state),
+            #[cfg(unix)]
+            Self::Unix(sockaddr) => {
+                if let Some(path) = sockaddr.as_pathname() {
+                    // use the underlying path as the hash
+                    path.hash(state);
+                } else {
+                    // unnamed or abstract UDS
+                    // abstract UDS name not yet exposed by std API
+                    // panic for now, we can decide on the right way to hash them later
+                    panic!("Unnamed and abstract UDS types not yet supported for hashing")
+                }
+            }
         }
     }
 }

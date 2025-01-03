@@ -2,8 +2,9 @@ use futures::future;
 use std::sync::Arc;
 
 use crate::listener::listener::{ListenerAddress, Socket};
+use crate::listener::socket::SocketAddress;
 use crate::pool::stream::StreamManager;
-use crate::service::peer::{PeerNetwork, UpstreamPeer};
+use crate::service::peer::UpstreamPeer;
 use crate::stream::stream::Stream;
 
 // TESTING traits for customization soon
@@ -123,11 +124,13 @@ impl<A: ServiceType + Send + Sync + 'static> Service<A> {
     async fn handle_connection(self: &Arc<Self>, downstream: Stream, _socket_address: Socket) {
         println!("some message!: {}", self.service.say_hi());
 
+        let address = SocketAddress::parse_tcp("127.0.0.1:8000");
+
         // simulate a given backend peer
         let peer = UpstreamPeer::new(
             "node 1",
             &self.name,
-            PeerNetwork::Tcp("127.0.0.1:8000".to_string()),
+            address,
             None,
         );
 

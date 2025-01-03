@@ -1,11 +1,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::{TcpSocket, UnixStream};
 use tokio::sync::Mutex;
+use std::os::unix::io::AsRawFd;
 
+use crate::listener::socket::SocketAddress;
+use crate::listener::sys::{set_dscp, set_recv_buf, set_tcp_fastopen_connect};
 use crate::pool::pool::{ConnectionMetadata, ConnectionPool};
-use crate::service::peer::{PeerNetwork, UpstreamPeer};
+use crate::service::peer::UpstreamPeer;
 use crate::stream::{stream::Stream, types::StreamType};
 
 // the stream manager is used as the bridge from request lifetime to connection pool
@@ -28,7 +31,10 @@ impl StreamManager {
 
     // used to retrive connection from pool
     // returns the stream and the bool value determine the newly created stream or reused
-    pub async fn get_connection_from_pool(&self, peer: &UpstreamPeer) -> Result<(Stream, bool), ()> {
+    pub async fn get_connection_from_pool(
+        &self,
+        peer: &UpstreamPeer,
+    ) -> tokio::io::Result<(Stream, bool)> {
         self.get_stream_connection(peer).await
     }
 
@@ -44,26 +50,47 @@ impl StreamManager {
 impl StreamManager {
     // used to make a new socket connection to upstream peer
     // returns the connection stream
-    async fn new_stream_connection(&self, peer: &UpstreamPeer) -> Result<Stream, ()> {
-        let stream = match &peer.network {
-            PeerNetwork::Tcp(address) => {
-                match TcpStream::connect(address).await {
+    async fn new_stream_connection(&self, peer: &UpstreamPeer) -> tokio::io::Result<Stream> {
+        let stream = match &peer.address {
+            SocketAddress::Tcp(address) => {
+                // identify tcp ip
+                let socket = if address.is_ipv4() {
+                    TcpSocket::new_v4()
+                } else {
+                    TcpSocket::new_v6()
+                }?;
+                // tcp tune
+                let fd = socket.as_raw_fd();
+                set_tcp_fastopen_connect(fd);
+                set_recv_buf(fd, 4194304); // hardcoded for a while
+                set_dscp(fd, 46); // hardcoded for a while
+                // connect tcp
+                match socket.connect(*address).await {
                     Ok(tcp_stream) => {
+                        // set no delay
+                        tcp_stream.set_nodelay(true);
+                        // dynamic type convert
                         let stream_type = StreamType::from(tcp_stream);
                         let dyn_stream_type: Stream = Box::new(stream_type);
                         dyn_stream_type
                     }
-                    Err(_) => return Err(()),
+                    Err(e) => return Err(e),
                 }
             }
-            PeerNetwork::Unix(socket_path) => match UnixStream::connect(socket_path).await {
-                Ok(unix_stream) => {
-                    let stream_type = StreamType::from(unix_stream);
-                    let dyn_stream_type: Stream = Box::new(stream_type);
-                    dyn_stream_type
+            SocketAddress::Unix(socket_path) => {
+                // get socket path
+                let path = socket_path.as_pathname().expect("none value in unix socket path");
+                // connect uds
+                match UnixStream::connect(path).await {
+                    Ok(unix_stream) => {
+                        // dynamic type convert
+                        let stream_type = StreamType::from(unix_stream);
+                        let dyn_stream_type: Stream = Box::new(stream_type);
+                        dyn_stream_type
+                    }
+                    Err(e) => return Err(e),
                 }
-                Err(_) => return Err(()),
-            },
+            }
         };
         Ok(stream)
     }
@@ -98,7 +125,10 @@ impl StreamManager {
     // this is the function that is going to be called during request
     // find a connection in pool, if does not exist, create a new socket connection
     // returns the stream and the bool to determine if the connection is new or reused.
-    async fn get_stream_connection(&self, peer: &UpstreamPeer) -> Result<(Stream, bool), ()> {
+    async fn get_stream_connection(
+        &self,
+        peer: &UpstreamPeer,
+    ) -> tokio::io::Result<(Stream, bool)> {
         // find connection from pool
         let reused_connection = self.find_connection_stream(&peer).await;
         match reused_connection {
@@ -108,7 +138,7 @@ impl StreamManager {
                 let new_stream_connection = self.new_stream_connection(&peer).await;
                 match new_stream_connection {
                     Ok(stream_connection) => return Ok((stream_connection, false)),
-                    Err(_) => return Err(()),
+                    Err(e) => return Err(e),
                 }
             }
         }

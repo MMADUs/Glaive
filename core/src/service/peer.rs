@@ -1,19 +1,13 @@
-use crate::pool::pool::ConnectionGroupID;
+use crate::{listener::socket::SocketAddress, pool::pool::ConnectionGroupID};
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
-
-// upstream peer network type
-pub enum PeerNetwork {
-    Tcp(String),
-    Unix(String),
-}
 
 // upstream peer is a metadata for upstream servers
 // storing information for server peer
 pub struct UpstreamPeer {
     pub name: String,
     pub service: String,
-    pub network: PeerNetwork,
+    pub address: SocketAddress,
     pub connection_timeout: Option<usize>,
 }
 
@@ -22,13 +16,13 @@ impl UpstreamPeer {
     pub fn new(
         name: &str,
         service: &str,
-        network_type: PeerNetwork,
+        socket_address: SocketAddress,
         timeout: Option<usize>,
     ) -> Self {
         UpstreamPeer {
             name: name.to_string(),
             service: service.to_string(),
-            network: network_type,
+            address: socket_address,
             connection_timeout: timeout,
         }
     }
@@ -47,18 +41,6 @@ impl Hash for UpstreamPeer {
     fn hash<H: Hasher>(&self, hasher: &mut H) {
         self.name.hash(hasher);
         self.service.hash(hasher);
-        // Hash the network enum variants and their contents
-        match &self.network {
-            PeerNetwork::Tcp(address) => {
-                // Hash a discriminant value for Tcp variant
-                hasher.write_u8(0);
-                address.hash(hasher);
-            }
-            PeerNetwork::Unix(path) => {
-                // Hash a discriminant value for Unix variant
-                hasher.write_u8(1);
-                path.hash(hasher);
-            }
-        }
+        self.address.hash(hasher);
     }
 }

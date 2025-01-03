@@ -1,6 +1,7 @@
+use crate::listener::socket::SocketAddress;
 use libc::{self, c_int, c_void, socklen_t};
 use std::{
-    io::{self, Error},
+    io::{self, Error, ErrorKind},
     mem,
     os::unix::io::RawFd,
     time::Duration,
@@ -186,5 +187,27 @@ pub fn ip_local_port_range(fd: RawFd, low: u16, high: u16) -> io::Result<()> {
     match result {
         Err(e) if e.raw_os_error() != Some(libc::ENOPROTOOPT) => Err(e),
         _ => Ok(()), // no error or ENOPROTOOPT
+    }
+}
+
+// set dscp
+pub fn set_dscp(fd: RawFd, value: u8) -> io::Result<()> {
+    // Convert the file descriptor to a SocketAddr
+    let sock = SocketAddress::from_raw_fd(fd, false);
+    let addr = match sock.as_ref().and_then(|s| s.as_tcp()) {
+        Some(a) => a,
+        None => {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "failed to set dscp, invalid IP socket",
+            ));
+        }
+    };
+
+    // Set the DSCP value based on whether it's IPv6 or IPv4
+    if addr.is_ipv6() {
+        set_socket_option(fd, libc::IPPROTO_IPV6, libc::IPV6_TCLASS, &(value as c_int))
+    } else {
+        set_socket_option(fd, libc::IPPROTO_IP, libc::IP_TOS, &(value as c_int))
     }
 }
