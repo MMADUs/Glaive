@@ -2,7 +2,7 @@ use core::panic;
 
 use futures::FutureExt;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::service::service::{Service, ServiceType};
 use crate::session::downstream::Downstream;

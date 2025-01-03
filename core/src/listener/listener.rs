@@ -151,30 +151,3 @@ impl ListenerAddress {
         }
     }
 }
-
-// the network stack is used for network configurations
-// this held many network for 1 service
-pub struct NetworkStack {
-    pub address_stack: Vec<ListenerAddress>,
-}
-
-impl NetworkStack {
-    // new network stack
-    pub fn new() -> Self {
-        NetworkStack {
-            address_stack: Vec::new(),
-        }
-    }
-
-    // add tcp address to network list
-    pub fn new_tcp_address(&mut self, addr: &str) {
-        let tcp_address = ListenerAddress::Tcp(addr.to_string());
-        self.address_stack.push(tcp_address);
-    }
-
-    // add unix socket path to network list
-    pub fn new_unix_path(&mut self, path: &str) {
-        let unix_path = ListenerAddress::Unix(path.to_string());
-        self.address_stack.push(unix_path);
-    }
-}
